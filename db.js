@@ -49,26 +49,27 @@ async function saveBattery(data) {
   const user = await getUser(); if (!user) throw new Error('No autenticado');
   const { voltages_initial, ...payload } = data;
   payload.user_id = user.id;
-  // Parseo explícito para evitar errores de tipo en Supabase
   payload.total_voltage = parseFloat(payload.total_voltage) || 0;
   payload.amperage = parseFloat(payload.amperage) || 0;
   payload.cell_count = parseInt(payload.cell_count) || 1;
 
+  // ✅ CORRECCIÓN: Detecta "nuevo" por el marcador 'new', no por existencia de ID
   const isNew = !payload.id || payload.id === 'new';
   if (isNew) payload.id = crypto.randomUUID();
 
   if (isOnline && supabaseClient) {
-    if (!isNew) {
-      const { error } = await supabaseClient.from('batteries').update(payload).eq('id', payload.id).eq('user_id', user.id);
+    if (isNew) {
+      const { error } = await supabaseClient.from('batteries').insert([payload]);
       if (error) throw error;
     } else {
-      const { error } = await supabaseClient.from('batteries').insert([payload]);
+      const { error } = await supabaseClient.from('batteries').update(payload).eq('id', payload.id).eq('user_id', user.id);
       if (error) throw error;
     }
   } else {
     offlineQueue.push({ type: 'save', table: 'batteries', payload });
     localStorage.setItem('lifepo4_offline', JSON.stringify(offlineQueue));
   }
+  return payload.id; // ✅ Retorna el ID para encadenar la lectura
 }
 
 async function saveReading(data) {

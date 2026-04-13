@@ -297,15 +297,15 @@ function openReadingModal(id=null) {
 }
 
 // ✅ saveRecord corregido con parseo numérico y actualización forzada
-async function saveRecord(e) {
+sync function saveRecord(e) {
   e.preventDefault();
   if(!currentUser) return showLoginModal();
   showLoading();
   try {
     if(currentTab==='dashboard') {
-      const newId = editingId || crypto.randomUUID();
-      const data = { 
-        id: newId, 
+      // ✅ Usar 'new' como marcador explícito para db.js
+      const data = {
+        id: editingId || 'new',
         created_at: new Date(document.getElementById('created_at').value).toISOString(),
         name: document.getElementById('name').value.trim(),
         model: document.getElementById('model').value.trim() || null,
@@ -321,8 +321,11 @@ async function saveRecord(e) {
         voltages.push(v);
       }
       
-      await window.db.saveBattery(data);
-      await window.db.saveReading({ battery_id: newId, recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
+      // ✅ Espera inserción real y obtén el ID generado
+      const batteryId = await window.db.saveBattery(data);
+      
+      // ✅ Inserta la lectura con el ID confirmado
+      await window.db.saveReading({ battery_id: batteryId, recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
     } else {
       const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
       const voltages = []; for(let i=0; i<bat.cell_count; i++) {
@@ -335,7 +338,7 @@ async function saveRecord(e) {
     }
     
     $modal?.close(); 
-    await loadData(); // ✅ Refresca cache completo desde BD
+    await loadData(); 
     if(currentTab==='readings') await loadDataReadings();
     renderAll();
   } catch(err) { alert('Error: '+err.message); } finally { hideLoading(); }
