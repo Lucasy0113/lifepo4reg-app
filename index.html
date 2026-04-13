@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiFePO4 Manager</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2563eb">
+</head>
+<body>
+  <header>
+    <button id="user-menu-btn" class="user-menu-btn">👤</button>
+    <button id="theme-toggle">🌗</button>
+    <div id="app-header">
+      <h1>🔋 LiFePO4 Manager</h1>
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="dashboard">Panel</button>
+        <button class="tab-btn" data-tab="readings" style="display:none;">Lecturas</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="filter-bar">
+      <label>Filtrar:</label>
+      <select id="battery-filter">
+        <option value="all">Todas las baterías</option>
+      </select>
+    </div>
+    <div id="list-container" class="list-container"></div>
+    <div id="pagination" class="pagination"></div>
+  </main>
+
+  <button id="add-btn" class="fab" style="display:none;">+</button>
+
+  <dialog id="modal">
+    <h2 id="modal-title">Nuevo Registro</h2>
+    <form id="record-form">
+      <div id="form-fields"></div>
+      <div class="modal-actions">
+        <button type="button" id="cancel-btn">Cancelar</button>
+        <button type="submit">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="drawer drawer-overlay"></div>
+  <div class="drawer">
+    <div class="drawer-content">
+      <button id="close-drawer" class="close-btn">×</button>
+      <h2>Mi Cuenta</h2>
+      <p class="user-info" id="user-email-display"></p>
+      <hr class="drawer-divider">
+      <h3>Cambiar Contraseña</h3>
+      <form id="change-pass-form">
+        <input type="password" id="current-pass" placeholder="Contraseña actual" required>
+        <input type="password" id="new-pass" placeholder="Nueva contraseña" required>
+        <input type="password" id="confirm-pass" placeholder="Confirmar nueva" required>
+        <button type="submit" class="btn-primary">Actualizar</button>
+        <p id="pass-msg" class="msg"></p>
+      </form>
+      <button id="logout-btn" class="btn-danger">🚪 Cerrar Sesión</button>
+    </div>
+  </div>
+
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <span>Procesando...</span>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="db.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
