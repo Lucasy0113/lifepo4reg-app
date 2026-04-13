@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>LiFePO4 Manager</title>
   <link rel="stylesheet" href="style.css">
   <link rel="manifest" href="manifest.json">
@@ -10,7 +10,6 @@
 </head>
 <body>
   <header>
-    <button id="user-menu-btn" class="user-menu-btn" aria-label="Perfil de usuario">👤</button>
     <button id="theme-toggle" aria-label="Cambiar tema">🌗</button>
     <div id="app-header">
       <h1>🔋 LiFePO4 Manager</h1>
@@ -19,6 +18,7 @@
         <button class="tab-btn" data-tab="readings" style="display:none;">Lecturas</button>
       </div>
     </div>
+    <button id="user-menu-btn" class="user-menu-btn" aria-label="Perfil de usuario">👤</button>
   </header>
 
   <main>
@@ -32,9 +32,8 @@
     <div id="pagination" class="pagination"></div>
   </main>
 
-  <button id="add-btn" class="fab" style="display:none;" aria-label="Agregar nueva batería">+</button>
+  <button id="add-btn" class="fab" style="display:none;" aria-label="Agregar batería">+</button>
 
-  <!-- Modal Unificado -->
   <dialog id="modal">
     <h2 id="modal-title">Registro</h2>
     <form id="record-form">
@@ -46,13 +45,12 @@
     </form>
   </dialog>
 
-  <!-- Drawer de Usuario (IDs únicos para evitar conflictos) -->
   <div id="drawer-overlay" class="drawer-overlay"></div>
   <div id="user-drawer" class="drawer-content">
-    <button id="close-drawer" class="close-btn" aria-label="Cerrar menú">×</button>
+    <button id="close-drawer" class="close-btn" aria-label="Cerrar">×</button>
     <h2>Mi Cuenta</h2>
     <p class="user-info" id="user-email-display"></p>
-    <hr class="drawer-divider">
+    <hr>
     <h3>Cambiar Contraseña</h3>
     <form id="change-pass-form">
       <input type="password" id="current-pass" placeholder="Contraseña actual" required>

@@ -24,42 +24,34 @@ async function getUser() {
 
 async function fetchBatteries() {
   if (!supabaseClient) return [];
-  const user = await getUser();
-  if (!user) return [];
-  try {
-    const { data, error } = await supabaseClient.from('batteries').select('*').eq('user_id', user.id).order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
-  } catch (e) { console.warn('Error fetchBatteries:', e); return []; }
+  const user = await getUser(); if (!user) return [];
+  try { const { data, error } = await supabaseClient.from('batteries').select('*').eq('user_id', user.id).order('created_at', { ascending: false }); if (error) throw error; return data || []; } 
+  catch (e) { console.warn('Error fetchBatteries:', e); return []; }
 }
 
 async function fetchReadings(batteryId) {
   if (!supabaseClient || !batteryId) return [];
-  const user = await getUser();
-  if (!user) return [];
-  try {
-    const { data, error } = await supabaseClient.from('cell_readings').select('*').eq('user_id', user.id).eq('battery_id', batteryId).order('recorded_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
-  } catch (e) { console.warn('Error fetchReadings:', e); return []; }
+  const user = await getUser(); if (!user) return [];
+  try { const { data, error } = await supabaseClient.from('cell_readings').select('*').eq('user_id', user.id).eq('battery_id', batteryId).order('recorded_at', { ascending: false }); if (error) throw error; return data || []; } 
+  catch (e) { console.warn('Error fetchReadings:', e); return []; }
 }
 
-function validateVoltages(arr) {
-  return arr.every(v => v >= 2.5 && v <= 3.65);
-}
+function validateVoltages(arr) { return arr.every(v => v >= 2.5 && v <= 3.65); }
 
+// ✅ SAVE BATTERY CORREGIDO
 async function saveBattery(data) {
   const user = await getUser(); if (!user) throw new Error('No autenticado');
-  // 🔑 Eliminamos 'voltages_initial' antes de enviarlo a Supabase
-  const { voltages_initial, ...payload } = data; 
+  const { voltages_initial, ...payload } = data; // Elimina campo inexistente
   payload.user_id = user.id;
   
+  // Si viene como 'new', generamos UUID válido para Supabase
+  if (payload.id === 'new' || !payload.id) payload.id = crypto.randomUUID();
+
   if (isOnline && supabaseClient) {
     if (payload.id && payload.id !== 'new') {
       const { error } = await supabaseClient.from('batteries').update(payload).eq('id', payload.id).eq('user_id', user.id);
       if (error) throw error;
     } else {
-      payload.id = crypto.randomUUID();
       const { error } = await supabaseClient.from('batteries').insert([payload]);
       if (error) throw error;
     }
@@ -73,12 +65,13 @@ async function saveReading(data) {
   const user = await getUser(); if (!user) throw new Error('No autenticado');
   if (!validateVoltages(data.voltages)) throw new Error('Voltajes fuera de rango (2.500 - 3.650 V)');
   const payload = { user_id: user.id, ...data };
+  if (payload.id === 'new' || !payload.id) payload.id = crypto.randomUUID();
+  
   if (isOnline && supabaseClient) {
-    if (payload.id && payload.id !== 'new') {
+    if (payload.id) {
       const { error } = await supabaseClient.from('cell_readings').update(payload).eq('id', payload.id).eq('user_id', user.id);
       if (error) throw error;
     } else {
-      payload.id = crypto.randomUUID();
       const { error } = await supabaseClient.from('cell_readings').insert([payload]);
       if (error) throw error;
     }

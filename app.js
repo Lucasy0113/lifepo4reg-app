@@ -12,7 +12,6 @@ let $list, $pagination, $modal, $form, $fields, $themeBtn, $addBtn, $loadingOver
 let $batteryFilter, $drawer, $drawerOverlay, $modalActions;
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Referencias DOM
   $list = document.getElementById('list-container');
   $pagination = document.getElementById('pagination');
   $modal = document.getElementById('modal');
@@ -24,18 +23,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   $submitBtn = document.getElementById('submit-btn');
   $batteryFilter = document.getElementById('battery-filter');
   $modalActions = document.querySelector('.modal-actions');
-  
-  // Drawer
   $drawer = document.getElementById('user-drawer');
   $drawerOverlay = document.getElementById('drawer-overlay');
 
+  // 🔒 RESET INICIAL: Cierra todo diálogo/overlay que pueda quedar activo
+  if($modal?.open) $modal.close();
+  $drawer?.classList.remove('open');
+  $drawerOverlay?.classList.remove('open');
+  hideLoading();
+  
   loadTheme();
   await waitForDb();
   setupAuthListener();
   setupUserMenu();
-  
-  // Bloqueo inicial: no renderizar nada hasta verificar auth
-  $list.innerHTML = '<div class="loading-overlay active" style="position:relative;background:transparent;"><div class="loading-spinner"></div></div>';
   await checkAuth();
   setupEvents();
 });
@@ -61,7 +61,6 @@ function getCubaNowISO() {
   return new Date().toLocaleString('sv-SE', { timeZone: 'America/Havana' }).replace(' ', 'T').slice(0, 16);
 }
 
-// 🔐 AUTENTICACIÓN CORREGIDA
 async function checkAuth() {
   const saved = localStorage.getItem('lifepo4_user');
   let verified = false;
@@ -84,9 +83,9 @@ async function checkAuth() {
     currentUser = null;
     if($addBtn) $addBtn.style.display = 'none';
     document.getElementById('user-menu-btn').style.display = 'none';
-    $list.innerHTML = '';
+    $list.innerHTML = '<div class="empty-state">Autenticación requerida</div>';
     $pagination.innerHTML = '';
-    showLoginModal(); // Muestra login OBLIGATORIAMENTE
+    showLoginModal();
   }
 }
 
@@ -96,13 +95,15 @@ function setupAuthListener() {
     if (event === 'SIGNED_IN' && session?.user) {
       currentUser = session.user;
       localStorage.setItem('lifepo4_user', JSON.stringify({ id: currentUser.id, email: currentUser.email }));
-      if ($modal?.open) $modal.close();
+      hideLoading();
+      if ($modal?.open) $modal.close(); // ✅ Cierra modal y backdrop
       document.getElementById('user-menu-btn').style.display = 'flex';
       if($addBtn) $addBtn.style.display = 'flex';
       loadData().then(() => renderAll()).catch(console.warn);
     } else if (event === 'SIGNED_OUT') {
       currentUser = null; batteriesCache = []; readingsCache = [];
       localStorage.removeItem('lifepo4_user');
+      hideLoading();
       document.getElementById('user-menu-btn').style.display = 'none';
       if($addBtn) $addBtn.style.display = 'none';
       renderAll(); showLoginModal();
@@ -118,8 +119,6 @@ function setupUserMenu() {
   const $logoutBtn = document.getElementById('logout-btn');
 
   if (!$userMenuBtn) return;
-  
-  // ✅ CORRECCIÓN: Usa IDs específicos en lugar de querySelector('.drawer')
   $userMenuBtn.addEventListener('click', () => {
     if (currentUser) {
       document.getElementById('user-email-display').textContent = currentUser.email;
@@ -133,7 +132,6 @@ function setupUserMenu() {
     $drawer?.classList.remove('open');
     $drawerOverlay?.classList.remove('open');
   };
-
   $closeDrawer?.addEventListener('click', closeDrawer);
   $drawerOverlay?.addEventListener('click', closeDrawer);
 
@@ -154,30 +152,21 @@ function setupUserMenu() {
     } catch (err) { $passMsg.textContent = '❌ ' + (err.message || 'Error'); $passMsg.className = 'msg error'; }
     finally { hideLoading(); }
   });
-
-  $logoutBtn?.addEventListener('click', async () => {
-    if (confirm('¿Cerrar sesión?')) { await window.db.signOut(); closeDrawer(); }
-  });
+  $logoutBtn?.addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) { await window.db.signOut(); closeDrawer(); } });
 }
 
 async function loadData() {
   if (!window.db) return renderAll();
-  try {
-    batteriesCache = await window.db.fetchBatteries();
-    updateFilterDropdown();
-    renderAll();
-  } catch (e) { console.error('❌ Error cargando:', e); renderAll(); }
+  try { batteriesCache = await window.db.fetchBatteries(); updateFilterDropdown(); renderAll(); } 
+  catch (e) { console.error('❌ Error cargando:', e); renderAll(); }
 }
-
 function updateFilterDropdown() {
   $batteryFilter.innerHTML = '<option value="all">Todas las baterías</option>';
   batteriesCache.forEach(b => {
-    const opt = document.createElement('option');
-    opt.value = b.id;
+    const opt = document.createElement('option'); opt.value = b.id;
     opt.textContent = b.name + (b.model ? ` (${b.model})` : '');
     $batteryFilter.appendChild(opt);
   });
-  if (selectedBatteryId && batteriesCache.some(b=>b.id===selectedBatteryId)) $batteryFilter.value = selectedBatteryId;
 }
 
 function setupEvents() {
@@ -186,8 +175,7 @@ function setupEvents() {
       const tab = e.target.dataset.tab;
       if (tab === 'dashboard') { selectedBatteryId = null; currentTab = 'dashboard'; currentPage=1; }
       document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-      e.target.classList.add('active');
-      renderAll();
+      e.target.classList.add('active'); renderAll();
     });
   });
 
@@ -217,18 +205,14 @@ function setupEvents() {
     if (target.classList.contains('reading-edit')) openReadingModal(id);
     if (target.classList.contains('reading-delete')) deleteReading(id);
   });
-  
   $themeBtn?.addEventListener('click', toggleTheme);
 }
 
 function renderAll() {
-  $list.innerHTML = '';
-  $pagination.innerHTML = '';
+  $list.innerHTML = ''; $pagination.innerHTML = '';
   if (!currentUser) return;
-  if (currentTab === 'dashboard') renderDashboard();
-  else renderReadingsList();
+  if (currentTab === 'dashboard') renderDashboard(); else renderReadingsList();
 }
-
 function renderDashboard() {
   const filtered = filterValue === 'all' ? batteriesCache : batteriesCache.filter(b=>b.id===filterValue);
   if (!filtered.length) { $list.innerHTML = '<div class="empty-state">No hay baterías. Toca + para agregar una.</div>'; return; }
@@ -237,86 +221,59 @@ function renderDashboard() {
     $list.innerHTML += renderBatteryCard(b, readings);
   });
 }
-
-// ... [MANTÉN TU FUNCIÓN renderBatteryCard, renderCells, renderStats IGUAL QUE ANTES] ...
-// Para ahorrar espacio, asumo que estas funciones ya están en tu app.js y funcionan bien visualmente.
-
+// ... [MANTÉN TUS FUNCIONES renderBatteryCard, renderCells, renderStats EXACTAMENTE IGUAL] ...
 function openReadingsView(batId) {
-  selectedBatteryId = batId;
-  currentTab = 'readings';
-  currentPage = 1;
+  selectedBatteryId = batId; currentTab = 'readings'; currentPage = 1;
   document.querySelector('.tab-btn[data-tab="readings"]').style.display = 'block';
   document.querySelector('.tab-btn[data-tab="readings"]').classList.add('active');
   document.querySelector('.tab-btn[data-tab="dashboard"]').classList.remove('active');
   loadDataReadings().then(renderAll);
 }
-
-async function loadDataReadings() {
-  if(!selectedBatteryId) return;
-  readingsCache = await window.db.fetchReadings(selectedBatteryId);
-}
-
+async function loadDataReadings() { if(!selectedBatteryId) return; readingsCache = await window.db.fetchReadings(selectedBatteryId); }
 function renderReadingsList() {
   const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
   if (!bat) return $list.innerHTML = '<div class="empty-state">Batería no encontrada.</div>';
   const sorted = [...readingsCache].sort((a,b)=>new Date(b.recorded_at)-new Date(a.recorded_at));
   const pageData = sorted.slice((currentPage-1)*ITEMS_PER_PAGE, currentPage*ITEMS_PER_PAGE);
   const totalPages = Math.ceil(sorted.length/ITEMS_PER_PAGE);
-
   let html = `<div class="reading-header">🔋 ${bat.name} ${bat.model?`(${bat.model})`:''}</div>
               <button onclick="currentTab='dashboard'; selectedBatteryId=null; document.querySelector('.tab-btn[data-tab=dashboard]').click(); renderAll();" style="margin-bottom:1rem; padding:0.4rem 0.8rem; background:var(--card); border:1px solid var(--border); border-radius:6px; cursor:pointer;">← Volver</button>`;
-  
   pageData.forEach(r => {
     html += `<article class="battery-card reading-card" data-id="${r.id}">
       <div style="text-align:center; font-size:0.85rem; color:var(--text-sec); margin-bottom:0.5rem;">${formatDate(r.recorded_at)}</div>
-      ${renderCellsGrid(r.voltages, 'latest')}
-      ${renderStats(r.voltages)}
+      ${renderCellsGrid(r.voltages, 'latest')} ${renderStats(r.voltages)}
       <div class="charger-info">Cargador V: ${parseChargerVal(r.charger_v)} | Cargador A: ${parseChargerVal(r.charger_a)}</div>
       <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
         <button class="btn-readings reading-edit" style="flex:1;">Editar</button>
         <button class="btn-delete reading-delete" style="flex:1;">Eliminar</button>
-      </div>
-    </article>`;
+      </div></article>`;
   });
-
   if(!pageData.length) html += '<div class="empty-state">Sin lecturas registradas.</div>';
   html += `<button onclick="openReadingModal()" style="margin-top:1rem; width:100%; padding:0.7rem; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer;">+ Nueva Lectura</button>`;
   html += renderPaginationControls(totalPages);
   $list.innerHTML = html;
 }
-
 function renderCellsGrid(voltages, type) {
   if (!voltages) return '<div class="empty-state">N/D</div>';
-  const vals = voltages.map(v => parseFloat(v));
-  const max = Math.max(...vals), min = Math.min(...vals);
+  const vals = voltages.map(v => parseFloat(v)); const max = Math.max(...vals), min = Math.min(...vals);
   let html = `<div class="cell-grid">`;
   vals.forEach((v, i) => {
-    let cls = '';
-    if(type==='latest'){ if(v===max) cls='cell-high'; else if(v===min) cls='cell-low'; }
+    let cls = type==='latest' ? (v===max?'cell-high':v===min?'cell-low':'') : '';
     html += `<div class="cell-box ${cls}"><div class="cell-label">Cel ${i+1}</div><div class="cell-value">${v.toFixed(3)}V</div></div>`;
   });
   html += `</div>`; return html;
 }
-
 function renderPaginationControls(totalPages) {
-  if(totalPages<=1) return '';
-  let html = '<div class="pagination">';
-  for(let i=1; i<=totalPages; i++) {
-    html += `<button onclick="currentPage=${i}; renderAll();" ${i===currentPage?'style="font-weight:bold;background:var(--primary);color:white;"':''}>${i}</button>`;
-  }
+  if(totalPages<=1) return ''; let html = '<div class="pagination">';
+  for(let i=1; i<=totalPages; i++) html += `<button onclick="currentPage=${i}; renderAll();" ${i===currentPage?'style="font-weight:bold;background:var(--primary);color:white;"':''}>${i}</button>`;
   html += '</div>'; return html;
 }
 
-// 🔧 MODALES CORREGIDOS
 function openBatteryModal(id=null) {
-  // ✅ CORRECCIÓN: Mostrar botones que Login ocultó
-  if ($modalActions) $modalActions.style.display = 'flex';
-  
-  editingId = id;
-  const bat = id ? batteriesCache.find(b=>b.id===id) : null;
+  if ($modalActions) $modalActions.style.display = 'flex'; // ✅ Muestra botones
+  editingId = id; const bat = id ? batteriesCache.find(b=>b.id===id) : null;
   document.getElementById('modal-title').textContent = id ? 'Editar Batería' : 'Nueva Batería';
-  $fields.innerHTML = '';
-  const now = getCubaNowISO();
+  $fields.innerHTML = ''; const now = getCubaNowISO();
   const config = [
     {id:'created_at', label:'Fecha/Hora Compra', type:'datetime-local', val: bat?.created_at?.slice(0,16) || now},
     {id:'name', label:'Nombre', type:'text', val: bat?.name || ''},
@@ -325,70 +282,52 @@ function openBatteryModal(id=null) {
     {id:'amperage', label:'Capacidad (Ah)', type:'number', step:'0.01', val: bat?.amperage || ''},
     {id:'cell_count', label:'Cantidad de Celdas', type:'number', step:'1', min:'1', val: bat?.cell_count || ''}
   ];
-  config.forEach(f => appendField(f, 'text'));
-  if(bat?.cell_count) appendCellFields(bat.cell_count, bat.voltages_initial || []);
-  
+  config.forEach(f => appendField(f));
+  if(bat?.cell_count) appendCellFields(bat.cell_count, []);
   $modal?.showModal();
-
   $fields.querySelector('#cell_count')?.addEventListener('input', (e) => {
     const count = parseInt(e.target.value) || 0;
-    const container = document.getElementById('cells-container');
-    if(container) container.innerHTML = '';
+    document.getElementById('cells-container')?.remove();
     if(count>0) appendCellFields(count, []);
   });
 }
-
 function appendField(f) {
   const wrap = document.createElement('div'); wrap.style.marginBottom='0.6rem';
   wrap.innerHTML = `<label style="display:block; margin-bottom:0.2rem; font-size:0.9rem; font-weight:500;">${f.label}</label>
     <input type="${f.type}" id="${f.id}" value="${f.val}" ${f.step?`step="${f.step}"`:''} ${f.min?`min="${f.min}"`:''} required>`;
   $fields?.appendChild(wrap);
 }
-
 function appendCellFields(count, initialVals=[]) {
   let html = '<div id="cells-container" style="margin-top:0.5rem; border-top:1px solid var(--border); padding-top:0.5rem;">';
   html += '<label style="display:block; margin-bottom:0.3rem; font-weight:500;">Voltaje Inicial por Celda (2.500 - 3.650 V)</label>';
-  for(let i=0; i<count; i++) {
-    html += `<input type="number" step="0.001" id="cell_${i}" placeholder="Cel ${i+1} (V)" value="${initialVals[i]||''}" required style="margin-bottom:0.3rem;">`;
-  }
-  html += '</div>';
-  $fields.insertAdjacentHTML('beforeend', html);
+  for(let i=0; i<count; i++) html += `<input type="number" step="0.001" id="cell_${i}" placeholder="Cel ${i+1} (V)" value="${initialVals[i]||''}" required style="margin-bottom:0.3rem;">`;
+  html += '</div>'; $fields.insertAdjacentHTML('beforeend', html);
 }
-
 function openReadingModal(id=null) {
-  if ($modalActions) $modalActions.style.display = 'flex'; // ✅ Mostrar botones
-  editingId = id;
-  const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
+  if ($modalActions) $modalActions.style.display = 'flex';
+  editingId = id; const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
   const read = id ? readingsCache.find(r=>r.id===id) : null;
   document.getElementById('modal-title').textContent = id ? 'Editar Lectura' : 'Nueva Lectura';
-  $fields.innerHTML = '';
-  const now = getCubaNowISO();
+  $fields.innerHTML = ''; const now = getCubaNowISO();
   appendField({id:'recorded_at', label:'Fecha/Hora Lectura', type:'datetime-local', val: read?.recorded_at?.slice(0,16) || now});
-  
   let html = `<div id="cells-container"><label style="display:block; margin-bottom:0.3rem; font-weight:500;">Voltaje por Celda (2.500 - 3.650 V)</label>`;
   for(let i=0; i<bat.cell_count; i++) {
     const val = read?.voltages ? (read.voltages[i]||'') : '';
     html += `<input type="number" step="0.001" id="cell_${i}" placeholder="Cel ${i+1} (V)" value="${val}" required style="margin-bottom:0.3rem;">`;
   }
-  html += `</div>
-    <div style="margin-top:0.5rem;">
-      <label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador V</label>
-      <input type="text" id="charger_v" value="${read?.charger_v || 'MPPT'}" style="margin-bottom:0.5rem;">
-      <label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador A</label>
-      <input type="text" id="charger_a" value="${read?.charger_a || 'MPPT'}">
-    </div>`;
+  html += `</div><div style="margin-top:0.5rem;"><label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador V</label><input type="text" id="charger_v" value="${read?.charger_v || 'MPPT'}" style="margin-bottom:0.5rem;"><label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador A</label><input type="text" id="charger_a" value="${read?.charger_a || 'MPPT'}"></div>`;
   $fields.insertAdjacentHTML('beforeend', html);
   $modal?.showModal();
 }
 
-// ✅ Función saveRecord corregida (elimina voltages_initial)
+// ✅ SAVE CORREGIDO: UUID VÁLIDO
 async function saveRecord(e) {
-  e.preventDefault();
-  if(!currentUser) return showLoginModal();
-  showLoading();
+  e.preventDefault(); if(!currentUser) return showLoginModal(); showLoading();
   try {
     if(currentTab==='dashboard') {
-      const data = { id: editingId || 'new', created_at: new Date(document.getElementById('created_at').value).toISOString() };
+      // Generamos UUID válido aquí para evitar el error "invalid input syntax"
+      const newId = editingId || crypto.randomUUID();
+      const data = { id: newId, created_at: new Date(document.getElementById('created_at').value).toISOString() };
       ['name','model','total_voltage','amperage','cell_count'].forEach(k => data[k] = document.getElementById(k).value);
       data.cell_count = parseInt(data.cell_count);
       const voltages = [];
@@ -397,36 +336,23 @@ async function saveRecord(e) {
         if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango (2.500-3.650V)`);
         voltages.push(v);
       }
-      // 🗑️ ELIMINADO: data.voltages_initial = voltages; (causaba error de schema)
       await window.db.saveBattery(data);
-      // Guardamos la primera lectura automáticamente
-      await window.db.saveReading({ battery_id: editingId || 'new', recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
+      await window.db.saveReading({ battery_id: newId, recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
     } else {
       const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
-      const voltages = [];
-      for(let i=0; i<bat.cell_count; i++) {
+      const voltages = []; for(let i=0; i<bat.cell_count; i++) {
         const v = parseFloat(document.getElementById(`cell_${i}`).value);
-        if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`);
-        voltages.push(v);
+        if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`); voltages.push(v);
       }
-      const data = { id: editingId || 'new', battery_id: selectedBatteryId, recorded_at: new Date(document.getElementById('recorded_at').value).toISOString(), voltages, charger_v: document.getElementById('charger_v').value || 'MPPT', charger_a: document.getElementById('charger_a').value || 'MPPT' };
+      const newId = editingId || crypto.randomUUID();
+      const data = { id: newId, battery_id: selectedBatteryId, recorded_at: new Date(document.getElementById('recorded_at').value).toISOString(), voltages, charger_v: document.getElementById('charger_v').value || 'MPPT', charger_a: document.getElementById('charger_a').value || 'MPPT' };
       await window.db.saveReading(data);
     }
     $modal?.close(); await loadData(); if(currentTab==='readings') await loadDataReadings(); renderAll();
   } catch(err) { alert('Error: '+err.message); } finally { hideLoading(); }
 }
-
-async function deleteBattery(id) {
-  if(!confirm('¿Eliminar esta batería y todas sus lecturas?')) return;
-  showLoading();
-  try { await window.db.deleteRecord('batteries', id); await loadData(); renderAll(); } catch(err){ alert(err.message); } finally { hideLoading(); }
-}
-
-async function deleteReading(id) {
-  if(!confirm('¿Eliminar esta lectura?')) return;
-  showLoading();
-  try { await window.db.deleteRecord('cell_readings', id); await loadDataReadings(); renderAll(); } catch(err){ alert(err.message); } finally { hideLoading(); }
-}
+async function deleteBattery(id) { if(!confirm('¿Eliminar batería y lecturas?')) return; showLoading(); try { await window.db.deleteRecord('batteries', id); await loadData(); renderAll(); } catch(err){ alert(err.message); } finally { hideLoading(); } }
+async function deleteReading(id) { if(!confirm('¿Eliminar lectura?')) return; showLoading(); try { await window.db.deleteRecord('cell_readings', id); await loadDataReadings(); renderAll(); } catch(err){ alert(err.message); } finally { hideLoading(); } }
 
 function formatDate(iso) { if (!iso) return 'N/D'; return new Date(iso).toLocaleString('es-CU', { timeZone: 'America/Havana', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).replace(',', ' -'); }
 function parseChargerVal(val) { if (!val || val === 'MPPT') return 'MPPT'; const n = parseFloat(val); return isNaN(n) ? 'MPPT' : n.toFixed(2); }
@@ -435,7 +361,7 @@ function toggleTheme() { document.body.className = document.body.className === '
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
 
 function showLoginModal() { 
-  if ($modalActions) $modalActions.style.display = 'none'; // Ocultar botones en login
+  if ($modalActions) $modalActions.style.display = 'none';
   document.getElementById('modal-title').textContent = 'Iniciar Sesión';
   $fields.innerHTML = `<div style="margin-bottom:1rem"><label>Email</label><input type="email" id="auth-email" required></div>
     <div style="margin-bottom:1rem"><label>Contraseña</label><input type="password" id="auth-pass" minlength="6" required></div>
@@ -453,9 +379,8 @@ async function handleAuth(type) {
   showLoading(); err.style.display='none';
   try {
     const res = type==='login' ? await window.db.signIn(e,p) : await window.db.signUp(e,p);
-    hideLoading(); // 🔑 Siempre ocultar carga primero
-    if(res?.data?.user) { 
-      if($modal?.open) $modal.close(); // 🔑 Cierra modal y elimina el backdrop oscuro
-    } else { err.textContent=res?.error?.message || 'Error de autenticación'; err.style.display='block'; }
+    hideLoading(); // ✅ Siempre ocultar carga primero
+    if(res?.data?.user) { if($modal?.open) $modal.close(); } // ✅ Cierra modal + backdrop
+    else { err.textContent=res?.error?.message || 'Error'; err.style.display='block'; }
   } catch(ex) { hideLoading(); err.textContent=ex.message; err.style.display='block'; }
 }
