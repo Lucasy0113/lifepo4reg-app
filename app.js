@@ -297,7 +297,7 @@ function openReadingModal(id=null) {
 }
 
 // ✅ saveRecord corregido con parseo numérico y actualización forzada
-sync function saveRecord(e) {
+async function saveRecord(e) {
   e.preventDefault();
   if(!currentUser) return showLoginModal();
   showLoading();
