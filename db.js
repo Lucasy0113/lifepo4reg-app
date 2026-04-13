@@ -77,15 +77,16 @@ async function saveReading(data) {
   if (!validateVoltages(data.voltages)) throw new Error('Voltajes fuera de rango (2.500 - 3.650 V)');
   const payload = { user_id: user.id, ...data };
   
+  // ✅ CORRECCIÓN CRÍTICA: Detecta creación por el string 'new'
   const isNew = !payload.id || payload.id === 'new';
   if (isNew) payload.id = crypto.randomUUID();
 
   if (isOnline && supabaseClient) {
-    if (!isNew) {
-      const { error } = await supabaseClient.from('cell_readings').update(payload).eq('id', payload.id).eq('user_id', user.id);
+    if (isNew) {
+      const { error } = await supabaseClient.from('cell_readings').insert([payload]);
       if (error) throw error;
     } else {
-      const { error } = await supabaseClient.from('cell_readings').insert([payload]);
+      const { error } = await supabaseClient.from('cell_readings').update(payload).eq('id', payload.id).eq('user_id', user.id);
       if (error) throw error;
     }
   } else {
