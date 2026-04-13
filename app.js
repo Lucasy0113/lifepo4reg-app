@@ -381,6 +381,7 @@ function openReadingModal(id=null) {
   $modal?.showModal();
 }
 
+// ✅ Función saveRecord corregida (elimina voltages_initial)
 async function saveRecord(e) {
   e.preventDefault();
   if(!currentUser) return showLoginModal();
@@ -396,8 +397,9 @@ async function saveRecord(e) {
         if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango (2.500-3.650V)`);
         voltages.push(v);
       }
-      data.voltages_initial = voltages; 
+      // 🗑️ ELIMINADO: data.voltages_initial = voltages; (causaba error de schema)
       await window.db.saveBattery(data);
+      // Guardamos la primera lectura automáticamente
       await window.db.saveReading({ battery_id: editingId || 'new', recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
     } else {
       const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
@@ -451,7 +453,9 @@ async function handleAuth(type) {
   showLoading(); err.style.display='none';
   try {
     const res = type==='login' ? await window.db.signIn(e,p) : await window.db.signUp(e,p);
-    if(res?.data?.user) { $modal.close(); } else { err.textContent=res?.error?.message; err.style.display='block'; }
-  } catch(ex) { err.textContent=ex.message; err.style.display='block'; }
-  finally { hideLoading(); }
+    hideLoading(); // 🔑 Siempre ocultar carga primero
+    if(res?.data?.user) { 
+      if($modal?.open) $modal.close(); // 🔑 Cierra modal y elimina el backdrop oscuro
+    } else { err.textContent=res?.error?.message || 'Error de autenticación'; err.style.display='block'; }
+  } catch(ex) { hideLoading(); err.textContent=ex.message; err.style.display='block'; }
 }

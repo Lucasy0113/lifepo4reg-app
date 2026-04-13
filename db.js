@@ -50,7 +50,10 @@ function validateVoltages(arr) {
 
 async function saveBattery(data) {
   const user = await getUser(); if (!user) throw new Error('No autenticado');
-  const payload = { user_id: user.id, ...data };
+  // 🔑 Eliminamos 'voltages_initial' antes de enviarlo a Supabase
+  const { voltages_initial, ...payload } = data; 
+  payload.user_id = user.id;
+  
   if (isOnline && supabaseClient) {
     if (payload.id && payload.id !== 'new') {
       const { error } = await supabaseClient.from('batteries').update(payload).eq('id', payload.id).eq('user_id', user.id);

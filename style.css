@@ -68,3 +68,29 @@ header { padding-left: 3.5rem; }
 .btn-danger { padding: 0.7rem; background: #fee2e2; color: #b91c1c; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; width: 100%; margin-top: 0.5rem; }
 .msg { font-size: 0.85rem; margin-top: 0.4rem; min-height: 1.2em; }
 .msg.success { color: #16a34a; } .msg.error { color: #ef4444; }
+/* ✅ Botones del Modal: Colores suaves y consistentes */
+.modal-actions { 
+  display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem; 
+}
+.modal-actions button {
+  padding: 0.6rem 1.2rem; border-radius: 8px; font-weight: 600; cursor: pointer;
+  transition: all 0.2s ease; font-size: 0.95rem; border: none; min-width: 90px;
+}
+
+/* Cancelar: Rojo claro */
+#cancel-btn { 
+  background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; 
+}
+#cancel-btn:hover { background: #fecaca; transform: translateY(-1px); box-shadow: 0 2px 6px rgba(185, 28, 28, 0.15); }
+
+/* Guardar: Azul claro */
+.modal-actions button[type="submit"] { 
+  background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; 
+}
+.modal-actions button[type="submit"]:hover { background: #bfdbfe; transform: translateY(-1px); box-shadow: 0 2px 6px rgba(29, 78, 216, 0.15); }
+
+/* 🌙 Ajustes para Modo Oscuro */
+body.dark #cancel-btn { background: #451a03; color: #fca5a5; border-color: #7f1d1d; }
+body.dark #cancel-btn:hover { background: #7f1d1d; color: #fee2e2; }
+body.dark .modal-actions button[type="submit"] { background: #1e3a8a; color: #93c5fd; border-color: #1e40af; }
+body.dark .modal-actions button[type="submit"]:hover { background: #1e40af; color: #dbeafe; }
