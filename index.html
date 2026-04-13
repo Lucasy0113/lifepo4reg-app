@@ -10,8 +10,8 @@
 </head>
 <body>
   <header>
-    <button id="user-menu-btn" class="user-menu-btn">👤</button>
-    <button id="theme-toggle">🌗</button>
+    <button id="user-menu-btn" class="user-menu-btn" aria-label="Perfil de usuario">👤</button>
+    <button id="theme-toggle" aria-label="Cambiar tema">🌗</button>
     <div id="app-header">
       <h1>🔋 LiFePO4 Manager</h1>
       <div class="tabs">
@@ -32,36 +32,36 @@
     <div id="pagination" class="pagination"></div>
   </main>
 
-  <button id="add-btn" class="fab" style="display:none;">+</button>
+  <button id="add-btn" class="fab" style="display:none;" aria-label="Agregar nueva batería">+</button>
 
+  <!-- Modal Unificado -->
   <dialog id="modal">
-    <h2 id="modal-title">Nuevo Registro</h2>
+    <h2 id="modal-title">Registro</h2>
     <form id="record-form">
       <div id="form-fields"></div>
       <div class="modal-actions">
         <button type="button" id="cancel-btn">Cancelar</button>
-        <button type="submit">Guardar</button>
+        <button type="submit" id="submit-btn">Guardar</button>
       </div>
     </form>
   </dialog>
 
-  <div class="drawer drawer-overlay"></div>
-  <div class="drawer">
-    <div class="drawer-content">
-      <button id="close-drawer" class="close-btn">×</button>
-      <h2>Mi Cuenta</h2>
-      <p class="user-info" id="user-email-display"></p>
-      <hr class="drawer-divider">
-      <h3>Cambiar Contraseña</h3>
-      <form id="change-pass-form">
-        <input type="password" id="current-pass" placeholder="Contraseña actual" required>
-        <input type="password" id="new-pass" placeholder="Nueva contraseña" required>
-        <input type="password" id="confirm-pass" placeholder="Confirmar nueva" required>
-        <button type="submit" class="btn-primary">Actualizar</button>
-        <p id="pass-msg" class="msg"></p>
-      </form>
-      <button id="logout-btn" class="btn-danger">🚪 Cerrar Sesión</button>
-    </div>
+  <!-- Drawer de Usuario (IDs únicos para evitar conflictos) -->
+  <div id="drawer-overlay" class="drawer-overlay"></div>
+  <div id="user-drawer" class="drawer-content">
+    <button id="close-drawer" class="close-btn" aria-label="Cerrar menú">×</button>
+    <h2>Mi Cuenta</h2>
+    <p class="user-info" id="user-email-display"></p>
+    <hr class="drawer-divider">
+    <h3>Cambiar Contraseña</h3>
+    <form id="change-pass-form">
+      <input type="password" id="current-pass" placeholder="Contraseña actual" required>
+      <input type="password" id="new-pass" placeholder="Nueva contraseña" required>
+      <input type="password" id="confirm-pass" placeholder="Confirmar nueva" required>
+      <button type="submit" class="btn-primary">Actualizar</button>
+      <p id="pass-msg" class="msg"></p>
+    </form>
+    <button id="logout-btn" class="btn-danger">🚪 Cerrar Sesión</button>
   </div>
 
   <div id="loading-overlay" class="loading-overlay">

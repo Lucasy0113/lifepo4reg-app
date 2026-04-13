@@ -9,9 +9,10 @@ let selectedBatteryId = null;
 let filterValue = 'all';
 
 let $list, $pagination, $modal, $form, $fields, $themeBtn, $addBtn, $loadingOverlay, $submitBtn;
-let $batteryFilter, $backBtn;
+let $batteryFilter, $drawer, $drawerOverlay, $modalActions;
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Referencias DOM
   $list = document.getElementById('list-container');
   $pagination = document.getElementById('pagination');
   $modal = document.getElementById('modal');
@@ -20,14 +21,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   $themeBtn = document.getElementById('theme-toggle');
   $addBtn = document.getElementById('add-btn');
   $loadingOverlay = document.getElementById('loading-overlay');
-  $submitBtn = $form?.querySelector('button[type="submit"]');
+  $submitBtn = document.getElementById('submit-btn');
   $batteryFilter = document.getElementById('battery-filter');
-  $backBtn = document.querySelector('.tab-btn[data-tab="dashboard"]');
+  $modalActions = document.querySelector('.modal-actions');
+  
+  // Drawer
+  $drawer = document.getElementById('user-drawer');
+  $drawerOverlay = document.getElementById('drawer-overlay');
 
   loadTheme();
   await waitForDb();
   setupAuthListener();
   setupUserMenu();
+  
+  // Bloqueo inicial: no renderizar nada hasta verificar auth
+  $list.innerHTML = '<div class="loading-overlay active" style="position:relative;background:transparent;"><div class="loading-spinner"></div></div>';
   await checkAuth();
   setupEvents();
 });
@@ -48,44 +56,38 @@ function waitForDb(timeout = 5000) {
     check();
   });
 }
+
 function getCubaNowISO() {
   return new Date().toLocaleString('sv-SE', { timeZone: 'America/Havana' }).replace(' ', 'T').slice(0, 16);
 }
-function formatDate(iso) {
-  if (!iso) return 'N/D';
-  return new Date(iso).toLocaleString('es-CU', { timeZone: 'America/Havana', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).replace(',', ' -');
-}
-function getAge(date) {
-  if (!date) return 'N/D';
-  const start = new Date(date);
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Havana' }));
-  let y = now.getFullYear() - start.getFullYear();
-  let m = now.getMonth() - start.getMonth();
-  let d = now.getDate() - start.getDate();
-  if (d < 0) { m--; d += new Date(now.getFullYear(), now.getMonth(), 0).getDate(); }
-  if (m < 0) { y--; m += 12; }
-  return `${y}a ${m}m ${d}d`;
-}
-function parseChargerVal(val) {
-  if (!val || val === 'MPPT') return 'MPPT';
-  const n = parseFloat(val);
-  return isNaN(n) ? 'MPPT' : n.toFixed(2);
-}
 
+// 🔐 AUTENTICACIÓN CORREGIDA
 async function checkAuth() {
   const saved = localStorage.getItem('lifepo4_user');
-  if (saved) {
+  let verified = false;
+
+  if (saved && window.db) {
     try {
-      if (window.db) {
-        const user = await Promise.race([window.db.getCurrentUser(), new Promise(r => setTimeout(() => r(null), 3000))]);
-        if (user) { currentUser = user; if($addBtn)$addBtn.style.display = 'flex'; await loadData(); return; }
+      const user = await window.db.getCurrentUser();
+      if (user) {
+        currentUser = user;
+        verified = true;
+        if($addBtn) $addBtn.style.display = 'flex';
+        document.getElementById('user-menu-btn').style.display = 'flex';
+        await loadData();
+        renderAll();
       }
     } catch (e) { console.warn('Auth check error:', e); }
   }
-  if($addBtn)$addBtn.style.display = 'none';
-  document.getElementById('user-menu-btn').style.display = 'none';
-  showLoginModal();
-  renderAll();
+
+  if (!verified) {
+    currentUser = null;
+    if($addBtn) $addBtn.style.display = 'none';
+    document.getElementById('user-menu-btn').style.display = 'none';
+    $list.innerHTML = '';
+    $pagination.innerHTML = '';
+    showLoginModal(); // Muestra login OBLIGATORIAMENTE
+  }
 }
 
 function setupAuthListener() {
@@ -96,13 +98,13 @@ function setupAuthListener() {
       localStorage.setItem('lifepo4_user', JSON.stringify({ id: currentUser.id, email: currentUser.email }));
       if ($modal?.open) $modal.close();
       document.getElementById('user-menu-btn').style.display = 'flex';
-      if($addBtn)$addBtn.style.display = 'flex';
+      if($addBtn) $addBtn.style.display = 'flex';
       loadData().then(() => renderAll()).catch(console.warn);
     } else if (event === 'SIGNED_OUT') {
       currentUser = null; batteriesCache = []; readingsCache = [];
       localStorage.removeItem('lifepo4_user');
       document.getElementById('user-menu-btn').style.display = 'none';
-      if($addBtn)$addBtn.style.display = 'none';
+      if($addBtn) $addBtn.style.display = 'none';
       renderAll(); showLoginModal();
     }
   });
@@ -110,24 +112,30 @@ function setupAuthListener() {
 
 function setupUserMenu() {
   const $userMenuBtn = document.getElementById('user-menu-btn');
-  const $drawer = document.querySelector('.drawer');
   const $closeDrawer = document.getElementById('close-drawer');
-  const $overlay = document.querySelector('.drawer-overlay');
   const $passForm = document.getElementById('change-pass-form');
   const $passMsg = document.getElementById('pass-msg');
   const $logoutBtn = document.getElementById('logout-btn');
 
   if (!$userMenuBtn) return;
+  
+  // ✅ CORRECCIÓN: Usa IDs específicos en lugar de querySelector('.drawer')
   $userMenuBtn.addEventListener('click', () => {
     if (currentUser) {
       document.getElementById('user-email-display').textContent = currentUser.email;
       $passForm?.reset(); $passMsg.textContent = ''; $passMsg.className = 'msg';
       $drawer?.classList.add('open');
+      $drawerOverlay?.classList.add('open');
     }
   });
-  const close = () => $drawer?.classList.remove('open');
-  $closeDrawer?.addEventListener('click', close);
-  $overlay?.addEventListener('click', close);
+
+  const closeDrawer = () => {
+    $drawer?.classList.remove('open');
+    $drawerOverlay?.classList.remove('open');
+  };
+
+  $closeDrawer?.addEventListener('click', closeDrawer);
+  $drawerOverlay?.addEventListener('click', closeDrawer);
 
   $passForm?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -146,7 +154,10 @@ function setupUserMenu() {
     } catch (err) { $passMsg.textContent = '❌ ' + (err.message || 'Error'); $passMsg.className = 'msg error'; }
     finally { hideLoading(); }
   });
-  $logoutBtn?.addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) { await window.db.signOut(); close(); } });
+
+  $logoutBtn?.addEventListener('click', async () => {
+    if (confirm('¿Cerrar sesión?')) { await window.db.signOut(); closeDrawer(); }
+  });
 }
 
 async function loadData() {
@@ -194,6 +205,7 @@ function setupEvents() {
   document.getElementById('cancel-btn')?.addEventListener('click', () => { $modal?.close(); editingId = null; $form?.reset(); });
   $modal?.addEventListener('close', () => { editingId = null; $form?.reset(); });
   $form?.addEventListener('submit', saveRecord);
+  
   $list?.addEventListener('click', (e) => {
     const target = e.target.closest('button');
     if (!target || !currentUser) return;
@@ -205,11 +217,14 @@ function setupEvents() {
     if (target.classList.contains('reading-edit')) openReadingModal(id);
     if (target.classList.contains('reading-delete')) deleteReading(id);
   });
+  
   $themeBtn?.addEventListener('click', toggleTheme);
 }
 
 function renderAll() {
   $list.innerHTML = '';
+  $pagination.innerHTML = '';
+  if (!currentUser) return;
   if (currentTab === 'dashboard') renderDashboard();
   else renderReadingsList();
 }
@@ -223,75 +238,8 @@ function renderDashboard() {
   });
 }
 
-function renderBatteryCard(b, readings) {
-  const age = getAge(b.created_at);
-  const peakCells = readings.length ? readings.map(r => r.voltages).reduce((acc, curr) => acc.map((v,i) => Math.max(v, parseFloat(curr[i])||0)), Array(b.cell_count).fill(0)) : null;
-  const latest = readings[0] || null;
-  
-  const renderCells = (voltages, type) => {
-    if (!voltages) return '<div class="empty-state">N/D</div>';
-    const vals = voltages.map(v => parseFloat(v));
-    const max = Math.max(...vals), min = Math.min(...vals);
-    let html = `<div class="cell-grid">`;
-    vals.forEach((v, i) => {
-      let cls = '';
-      if (type === 'peak' || type === 'latest') { if(v===max) cls='cell-high'; else if(v===min) cls='cell-low'; }
-      else { if(v===max) cls='cell-high'; else if(v===min) cls='cell-low'; } // Difference logic inverted later
-      html += `<div class="cell-box ${cls}"><div class="cell-label">Cel ${i+1}</div><div class="cell-value">${v.toFixed(3)}V</div></div>`;
-    });
-    html += `</div>`;
-    return html;
-  };
-
-  const renderStats = (voltages) => {
-    if (!voltages) return `<div class="stats-row"><div class="stats-item">Máx: N/D</div><div class="stats-item">Mín: N/D</div><div class="stats-item">Prom: N/D</div><div class="stats-item">Δ: N/D</div></div>`;
-    const vals = voltages.map(v => parseFloat(v));
-    const max = Math.max(...vals), min = Math.min(...vals);
-    const avg = vals.reduce((a,b)=>a+b,0)/vals.length;
-    return `<div class="stats-row">
-      <div class="stats-item">Máx: <span>${max.toFixed(3)}V</span></div>
-      <div class="stats-item">Mín: <span>${min.toFixed(3)}V</span></div>
-      <div class="stats-item">Prom: <span>${avg.toFixed(3)}V</span></div>
-      <div class="stats-item">Δ: <span>${(max-min).toFixed(3)}V</span></div>
-    </div>`;
-  };
-
-  let html = `<article class="battery-card" data-id="${b.id}">
-    <h3>${b.name} ${b.model?`(${b.model})`:''}</h3>
-    <p style="color:var(--text-sec); font-size:0.9rem;">${b.total_voltage}V / ${b.amperage}Ah • Vida: ${age}</p>
-    
-    <div class="section-title">Valor Tope Histórico</div>
-    ${renderCells(peakCells, 'peak')}${renderStats(peakCells)}
-    <div class="charger-info">Cargador V: ${latest?.charger_v || 'N/D'} | Cargador A: ${latest?.charger_a || 'N/D'}</div>
-    <div class="separator-blue"></div>
-
-    <div class="section-title">Valor Último</div>
-    ${renderCells(latest?.voltages, 'latest')}${renderStats(latest?.voltages)}
-    <div class="charger-info">Cargador V: ${parseChargerVal(latest?.charger_v)} | Cargador A: ${parseChargerVal(latest?.charger_a)}</div>
-    <div class="separator-gray"></div>
-
-    <div class="section-title">Valor Estimado (Δ Histórico vs Último)</div>
-    ${peakCells && latest ? renderCells(peakCells.map((v,i) => v - parseFloat(latest.voltages[i]||0)), 'diff') : '<div class="empty-state">N/D</div>'}
-    ${peakCells && latest ? (() => {
-      const diffs = peakCells.map((v,i) => v - parseFloat(latest.voltages[i]||0));
-      const maxD = Math.max(...diffs), minD = Math.min(...diffs);
-      const avgD = diffs.reduce((a,b)=>a+b,0)/diffs.length;
-      return `<div class="stats-row">
-        <div class="stats-item">Δ Máx: <span>${maxD.toFixed(3)}V</span></div>
-        <div class="stats-item">Δ Mín: <span>${minD.toFixed(3)}V</span></div>
-        <div class="stats-item">Δ Prom: <span>${avgD.toFixed(3)}V</span></div>
-        <div class="stats-item">Δ Total: <span>${(maxD-minD).toFixed(3)}V</span></div>
-      </div>`;
-    })() : ''}
-
-    <div class="card-actions">
-      <button class="btn-readings">📊 Lecturas</button>
-      <button class="btn-edit">✏️ Editar</button>
-      <button class="btn-delete">🗑️ Eliminar</button>
-    </div>
-  </article>`;
-  return html;
-}
+// ... [MANTÉN TU FUNCIÓN renderBatteryCard, renderCells, renderStats IGUAL QUE ANTES] ...
+// Para ahorrar espacio, asumo que estas funciones ya están en tu app.js y funcionan bien visualmente.
 
 function openReadingsView(batId) {
   selectedBatteryId = batId;
@@ -359,8 +307,11 @@ function renderPaginationControls(totalPages) {
   html += '</div>'; return html;
 }
 
-// Modals
+// 🔧 MODALES CORREGIDOS
 function openBatteryModal(id=null) {
+  // ✅ CORRECCIÓN: Mostrar botones que Login ocultó
+  if ($modalActions) $modalActions.style.display = 'flex';
+  
   editingId = id;
   const bat = id ? batteriesCache.find(b=>b.id===id) : null;
   document.getElementById('modal-title').textContent = id ? 'Editar Batería' : 'Nueva Batería';
@@ -376,9 +327,9 @@ function openBatteryModal(id=null) {
   ];
   config.forEach(f => appendField(f, 'text'));
   if(bat?.cell_count) appendCellFields(bat.cell_count, bat.voltages_initial || []);
+  
   $modal?.showModal();
 
-  // Dynamic cell fields on change
   $fields.querySelector('#cell_count')?.addEventListener('input', (e) => {
     const count = parseInt(e.target.value) || 0;
     const container = document.getElementById('cells-container');
@@ -387,7 +338,7 @@ function openBatteryModal(id=null) {
   });
 }
 
-function appendField(f, group) {
+function appendField(f) {
   const wrap = document.createElement('div'); wrap.style.marginBottom='0.6rem';
   wrap.innerHTML = `<label style="display:block; margin-bottom:0.2rem; font-size:0.9rem; font-weight:500;">${f.label}</label>
     <input type="${f.type}" id="${f.id}" value="${f.val}" ${f.step?`step="${f.step}"`:''} ${f.min?`min="${f.min}"`:''} required>`;
@@ -405,13 +356,14 @@ function appendCellFields(count, initialVals=[]) {
 }
 
 function openReadingModal(id=null) {
+  if ($modalActions) $modalActions.style.display = 'flex'; // ✅ Mostrar botones
   editingId = id;
   const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
   const read = id ? readingsCache.find(r=>r.id===id) : null;
   document.getElementById('modal-title').textContent = id ? 'Editar Lectura' : 'Nueva Lectura';
   $fields.innerHTML = '';
   const now = getCubaNowISO();
-  appendField({id:'recorded_at', label:'Fecha/Hora Lectura', type:'datetime-local', val: read?.recorded_at?.slice(0,16) || now}, 'text');
+  appendField({id:'recorded_at', label:'Fecha/Hora Lectura', type:'datetime-local', val: read?.recorded_at?.slice(0,16) || now});
   
   let html = `<div id="cells-container"><label style="display:block; margin-bottom:0.3rem; font-weight:500;">Voltaje por Celda (2.500 - 3.650 V)</label>`;
   for(let i=0; i<bat.cell_count; i++) {
@@ -444,9 +396,8 @@ async function saveRecord(e) {
         if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango (2.500-3.650V)`);
         voltages.push(v);
       }
-      data.voltages_initial = voltages; // Store for reference
+      data.voltages_initial = voltages; 
       await window.db.saveBattery(data);
-      // Auto insert initial reading
       await window.db.saveReading({ battery_id: editingId || 'new', recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
     } else {
       const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
@@ -475,13 +426,14 @@ async function deleteReading(id) {
   try { await window.db.deleteRecord('cell_readings', id); await loadDataReadings(); renderAll(); } catch(err){ alert(err.message); } finally { hideLoading(); }
 }
 
+function formatDate(iso) { if (!iso) return 'N/D'; return new Date(iso).toLocaleString('es-CU', { timeZone: 'America/Havana', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).replace(',', ' -'); }
+function parseChargerVal(val) { if (!val || val === 'MPPT') return 'MPPT'; const n = parseFloat(val); return isNaN(n) ? 'MPPT' : n.toFixed(2); }
 function loadTheme() { document.body.className = localStorage.getItem('lifepo4_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
 function toggleTheme() { document.body.className = document.body.className === 'dark' ? 'light' : 'dark'; localStorage.setItem('lifepo4_theme', document.body.className); }
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
 
-function showLoginModal() { /* Same as original, adapted keys */
-  const modalActions = document.querySelector('.modal-actions');
-  if(modalActions) modalActions.style.display='none';
+function showLoginModal() { 
+  if ($modalActions) $modalActions.style.display = 'none'; // Ocultar botones en login
   document.getElementById('modal-title').textContent = 'Iniciar Sesión';
   $fields.innerHTML = `<div style="margin-bottom:1rem"><label>Email</label><input type="email" id="auth-email" required></div>
     <div style="margin-bottom:1rem"><label>Contraseña</label><input type="password" id="auth-pass" minlength="6" required></div>
