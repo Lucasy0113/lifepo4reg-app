@@ -4,7 +4,7 @@ const ITEMS_PER_PAGE = 10;
 let editingId = null;
 let currentUser = null;
 let batteriesCache = [];
-let readingsCache = [];
+let readingsCache = []; // ✅ Solo contendrá lecturas de la batería seleccionada
 let selectedBatteryId = null;
 let filterValue = 'all';
 
@@ -129,14 +129,15 @@ async function loadData() {
   if (!window.db) return renderAll();
   try {
     batteriesCache = await window.db.fetchBatteries();
-    readingsCache = [];
+    readingsCache = []; // ✅ Limpia caché global de lecturas
     if (batteriesCache.length > 0) { const allReadings = await Promise.all(batteriesCache.map(b => window.db.fetchReadings(b.id))); readingsCache = allReadings.flat(); }
     updateFilterDropdown(); renderAll();
   } catch (e) { console.error('❌ Error cargando:', e); renderAll(); }
 }
+
 function updateFilterDropdown() { $batteryFilter.innerHTML = '<option value="all">Todas las baterías</option>'; batteriesCache.forEach(b => { const opt = document.createElement('option'); opt.value = b.id; opt.textContent = b.name + (b.model ? ` (${b.model})` : ''); $batteryFilter.appendChild(opt); }); if (selectedBatteryId && batteriesCache.some(b=>b.id===selectedBatteryId)) $batteryFilter.value = selectedBatteryId; }
 
-// ✅ TABS & EVENTS CORREGIDOS
+// ✅ TABS & EVENTS CORREGIDOS (Visibles siempre, aislamiento estricto)
 function setupEvents() {
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -145,15 +146,21 @@ function setupEvents() {
       document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
       e.target.classList.add('active');
       currentTab = tab; currentPage = 1;
-      if (tab === 'readings' && !selectedBatteryId) {
-        if (batteriesCache.length > 0) { selectedBatteryId = batteriesCache[0].id; $batteryFilter.value = selectedBatteryId; }
-        else { alert("Crea o selecciona una batería primero."); currentTab = 'dashboard'; document.querySelector('.tab-btn[data-tab="dashboard"]').click(); return; }
+      
+      if (tab === 'readings') {
+        if (!selectedBatteryId) {
+          $list.innerHTML = '<div class="empty-state">⚠️ Selecciona una batería en el Panel y toca "📊 Lecturas" para ver sus registros.</div>';
+          $pagination.innerHTML = '';
+          return;
+        }
+        loadDataReadings().then(renderAll);
+      } else {
+        renderAll();
       }
-      renderAll();
     });
   });
 
-  $batteryFilter.addEventListener('change', (e) => { filterValue = e.target.value; selectedBatteryId = filterValue === 'all' ? null : filterValue; currentTab = 'dashboard'; currentPage = 1; document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active'); document.querySelector('.tab-btn[data-tab="readings"]').classList.remove('active'); document.querySelector('.tab-btn[data-tab="readings"]').style.display = 'none'; renderAll(); });
+  $batteryFilter.addEventListener('change', (e) => { filterValue = e.target.value; selectedBatteryId = filterValue === 'all' ? null : filterValue; currentTab = 'dashboard'; currentPage = 1; document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active'); document.querySelector('.tab-btn[data-tab="readings"]').classList.remove('active'); renderAll(); });
 
   $addBtn?.addEventListener('click', () => currentUser ? openBatteryModal() : showLoginModal());
   document.getElementById('cancel-btn')?.addEventListener('click', () => { $modal?.close(); editingId = null; $form?.reset(); });
@@ -163,10 +170,18 @@ function setupEvents() {
   $list?.addEventListener('click', (e) => {
     const target = e.target.closest('button');
     if (!target || !currentUser) return;
-    e.preventDefault(); e.stopPropagation(); // ✅ Evita doble disparo
+    e.preventDefault(); e.stopPropagation();
     const card = target.closest('.battery-card, .reading-card');
     const id = card?.dataset.id;
-    if (target.classList.contains('btn-readings')) { selectedBatteryId = id; currentTab = 'readings'; currentPage=1; document.querySelector('.tab-btn[data-tab="readings"]').click(); return; }
+    
+    if (target.classList.contains('btn-readings')) { 
+      selectedBatteryId = id; 
+      currentTab = 'readings'; 
+      document.querySelector('.tab-btn[data-tab="readings"]').classList.add('active');
+      document.querySelector('.tab-btn[data-tab="dashboard"]').classList.remove('active');
+      loadDataReadings().then(renderAll); 
+      return; 
+    }
     if (target.classList.contains('btn-edit')) openBatteryModal(id);
     if (target.classList.contains('btn-delete')) deleteBattery(id);
     if (target.classList.contains('reading-edit')) openReadingModal(id);
@@ -176,35 +191,48 @@ function setupEvents() {
 }
 
 function renderAll() { $list.innerHTML = ''; $pagination.innerHTML = ''; if (!currentUser) return; if (currentTab === 'dashboard') renderDashboard(); else renderReadingsList(); }
-function renderDashboard() {
-  const filtered = filterValue === 'all' ? batteriesCache : batteriesCache.filter(b=>b.id===filterValue);
-  
-  // ✅ Filtra registros vacíos o incompletos
-  const validBatteries = filtered.filter(b => b.name && b.cell_count > 0);
-  
-  if (!validBatteries.length) { 
-    $list.innerHTML = '<div class="empty-state">No hay baterías válidas. Toca + para agregar una.</div>'; 
-    return; 
-  }
-  validBatteries.forEach(b => { 
-    const readings = readingsCache.filter(r => r.battery_id === b.id); 
-    $list.innerHTML += renderBatteryCard(b, readings); 
-  });
+function renderDashboard() { const filtered = filterValue === 'all' ? batteriesCache : batteriesCache.filter(b=>b.id===filterValue); const validBatteries = filtered.filter(b => b.name && b.cell_count > 0); if (!validBatteries.length) { $list.innerHTML = '<div class="empty-state">No hay baterías válidas. Toca + para agregar una.</div>'; return; } validBatteries.forEach(b => { const readings = readingsCache.filter(r => r.battery_id === b.id); $list.innerHTML += renderBatteryCard(b, readings); }); }
+
+// ✅ CARGA ESTRICTA POR BATERÍA
+async function loadDataReadings() {
+  if(!selectedBatteryId) return;
+  readingsCache = await window.db.fetchReadings(selectedBatteryId); // Solo esta batería
 }
 
-async function loadDataReadings() { if(!selectedBatteryId) return; readingsCache = await window.db.fetchReadings(selectedBatteryId); }
 function renderReadingsList() {
   const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
-  if (!bat) return $list.innerHTML = '<div class="empty-state">Batería no encontrada.</div>';
+  if (!bat) return $list.innerHTML = '<div class="empty-state">Batería no seleccionada.</div>';
+  
   const sorted = [...readingsCache].sort((a,b)=>new Date(b.recorded_at)-new Date(a.recorded_at));
   const pageData = sorted.slice((currentPage-1)*ITEMS_PER_PAGE, currentPage*ITEMS_PER_PAGE);
   const totalPages = Math.ceil(sorted.length/ITEMS_PER_PAGE);
-  let html = `<div class="reading-header">🔋 ${bat.name} ${bat.model?`(${bat.model})`:''}</div><button onclick="currentTab='dashboard'; selectedBatteryId=null; document.querySelector('.tab-btn[data-tab=dashboard]').click(); renderAll();" style="margin-bottom:1rem; padding:0.4rem 0.8rem; background:var(--card); border:1px solid var(--border); border-radius:6px; cursor:pointer;">← Volver</button>`;
-  pageData.forEach(r => { html += `<article class="battery-card reading-card" data-id="${r.id}"><div style="text-align:center; font-size:0.85rem; color:var(--text-sec); margin-bottom:0.5rem;">${formatDate(r.recorded_at)}</div>${renderCells(r.voltages, 'latest')} ${renderStats(r.voltages)}<div class="charger-info">Cargador V: ${parseChargerVal(r.charger_v)} | Cargador A: ${parseChargerVal(r.charger_a)}</div><div style="margin-top:0.5rem; display:flex; gap:0.5rem;"><button class="btn-readings reading-edit" style="flex:1;">Editar</button><button class="btn-delete reading-delete" style="flex:1;">Eliminar</button></div></article>`; });
-  if(!pageData.length) html += '<div class="empty-state">Sin lecturas registradas.</div>';
+
+  // ✅ Subtítulo claro de la batería
+  let html = `<div style="text-align:center; margin-bottom:1.5rem; padding:1rem; background:var(--card); border-radius:8px; box-shadow:var(--shadow);">
+    <div style="font-size:1.2rem; font-weight:700; color:var(--primary); margin-bottom:0.3rem;">🔋 ${bat.name}</div>
+    <div style="color:var(--text-sec); font-size:0.9rem;">${bat.model || 'Sin modelo'} • ${bat.total_voltage}V / ${bat.amperage}Ah</div>
+  </div>`;
+  
+  html += `<button onclick="currentTab='dashboard'; selectedBatteryId=null; document.querySelector('.tab-btn[data-tab=dashboard]').click(); renderAll();" style="margin-bottom:1rem; padding:0.4rem 0.8rem; background:var(--card); border:1px solid var(--border); border-radius:6px; cursor:pointer;">← Volver al Panel</button>`;
+  
+  pageData.forEach(r => { 
+    html += `<article class="battery-card reading-card" data-id="${r.id}">
+      <div style="text-align:center; font-size:0.85rem; color:var(--text-sec); margin-bottom:0.5rem;">📅 ${formatDate(r.recorded_at)}</div>
+      ${renderCells(r.voltages, 'latest')} ${renderStats(r.voltages)}
+      <div class="charger-info">Cargador V: ${parseChargerVal(r.charger_v)} | Cargador A: ${parseChargerVal(r.charger_a)}</div>
+      <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+        <button class="btn-readings reading-edit" style="flex:1;">Editar</button>
+        <button class="btn-delete reading-delete" style="flex:1;">Eliminar</button>
+      </div>
+    </article>`; 
+  });
+  
+  if(!pageData.length) html += '<div class="empty-state">Sin lecturas registradas para esta batería.</div>';
   html += `<button onclick="openReadingModal()" style="margin-top:1rem; width:100%; padding:0.7rem; background:var(--primary); color:white; border:none; border-radius:6px; cursor:pointer;">+ Nueva Lectura</button>`;
-  html += renderPaginationControls(totalPages); $list.innerHTML = html;
+  html += renderPaginationControls(totalPages); 
+  $list.innerHTML = html;
 }
+
 function renderPaginationControls(totalPages) { if(totalPages<=1) return ''; let html = '<div class="pagination">'; for(let i=1; i<=totalPages; i++) html += `<button onclick="currentPage=${i}; renderAll();" ${i===currentPage?'style="font-weight:bold;background:var(--primary);color:white;"':''}>${i}</button>`; html += '</div>'; return html; }
 
 // ✅ MODALES & GUARDADO
@@ -214,81 +242,29 @@ function appendCellFields(count, initialVals=[]) { let html = '<div id="cells-co
 
 function openReadingModal(id=null) { if ($modalActions) $modalActions.style.display = 'flex'; editingId = id; const bat = batteriesCache.find(b=>b.id===selectedBatteryId); const read = id ? readingsCache.find(r=>r.id===id) : null; document.getElementById('modal-title').textContent = id ? 'Editar Lectura' : 'Nueva Lectura'; $fields.innerHTML = ''; const now = getCubaNowISO(); appendField({id:'recorded_at', label:'Fecha/Hora Lectura', type:'datetime-local', val: read?.recorded_at?.slice(0,16) || now}); let html = `<div id="cells-container"><label style="display:block; margin-bottom:0.3rem; font-weight:500;">Voltaje por Celda (2.500 - 3.650 V)</label>`; for(let i=0; i<bat.cell_count; i++) { const val = read?.voltages ? (read.voltages[i]||'') : ''; html += `<input type="number" step="0.001" id="cell_${i}" placeholder="Cel ${i+1} (V)" value="${val}" required style="margin-bottom:0.3rem;">`; } html += `</div><div style="margin-top:0.5rem;"><label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador V</label><input type="text" id="charger_v" value="${read?.charger_v || 'MPPT'}" style="margin-bottom:0.5rem;"><label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador A</label><input type="text" id="charger_a" value="${read?.charger_a || 'MPPT'}"></div>`; $fields.insertAdjacentHTML('beforeend', html); $modal?.showModal(); }
 
-// ✅ SAVE RECORD CORREGIDO (Sin lecturas fantasmas al editar, inserta correctamente)
-async function saveRecord(e) {
-  e.preventDefault(); if(!currentUser) return showLoginModal(); showLoading();
-  try {
-    if(currentTab==='dashboard') {
-      const isNew = !editingId;
-      const data = {
-        id: editingId || 'new',
-        created_at: new Date(document.getElementById('created_at').value).toISOString(),
-        name: document.getElementById('name').value.trim(),
-        model: document.getElementById('model').value.trim() || null,
-        total_voltage: document.getElementById('total_voltage').value,
-        amperage: document.getElementById('amperage').value,
-        cell_count: document.getElementById('cell_count').value
-      };
-      
-      const voltages = []; 
-      const cellCount = parseInt(data.cell_count) || 0;
-      for(let i=0; i<cellCount; i++) {
-        const v = parseFloat(document.getElementById(`cell_${i}`)?.value);
-        if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango (2.500-3.650V)`);
-        voltages.push(v);
-      }
-      
-      // ✅ Espera inserción real y obtén el ID generado
-      const batteryId = await window.db.saveBattery(data);
-      
-      // ✅ SOLO crea lectura inicial si es UNA NUEVA batería
-      if (isNew && voltages.length > 0) {
-        await window.db.saveReading({ battery_id: batteryId, recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
-      }
-    } else {
-      const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
-      const voltages = []; for(let i=0; i<bat.cell_count; i++) {
-        const v = parseFloat(document.getElementById(`cell_${i}`).value);
-        if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`); voltages.push(v);
-      }
-      const data = { id: editingId || 'new', battery_id: selectedBatteryId, recorded_at: new Date(document.getElementById('recorded_at').value).toISOString(), voltages, charger_v: document.getElementById('charger_v').value || 'MPPT', charger_a: document.getElementById('charger_a').value || 'MPPT' };
-      await window.db.saveReading(data);
-    }
-    
-    $modal?.close(); 
-    await loadData(); 
-    if(currentTab==='readings') await loadDataReadings();
-    renderAll();
-  } catch(err) { alert('Error: '+err.message); } finally { hideLoading(); }
-}
+async function saveRecord(e) { e.preventDefault(); if(!currentUser) return showLoginModal(); showLoading(); try {
+  if(currentTab==='dashboard') {
+    const isNew = !editingId;
+    const data = { id: editingId || 'new', created_at: new Date(document.getElementById('created_at').value).toISOString(), name: document.getElementById('name').value.trim(), model: document.getElementById('model').value.trim() || null, total_voltage: document.getElementById('total_voltage').value, amperage: document.getElementById('amperage').value, cell_count: document.getElementById('cell_count').value };
+    const voltages = []; const cellCount = parseInt(data.cell_count) || 0;
+    for(let i=0; i<cellCount; i++) { const v = parseFloat(document.getElementById(`cell_${i}`)?.value); if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`); voltages.push(v); }
+    const batteryId = await window.db.saveBattery(data);
+    if (isNew && voltages.length > 0) await window.db.saveReading({ battery_id: batteryId, recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
+  } else {
+    const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
+    const voltages = []; for(let i=0; i<bat.cell_count; i++) { const v = parseFloat(document.getElementById(`cell_${i}`).value); if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`); voltages.push(v); }
+    const data = { id: editingId || 'new', battery_id: selectedBatteryId, recorded_at: new Date(document.getElementById('recorded_at').value).toISOString(), voltages, charger_v: document.getElementById('charger_v').value || 'MPPT', charger_a: document.getElementById('charger_a').value || 'MPPT' };
+    await window.db.saveReading(data);
+  }
+  $modal?.close(); await loadData(); if(currentTab==='readings') await loadDataReadings(); renderAll();
+} catch(err) { alert('Error: '+err.message); } finally { hideLoading(); } }
 
 async function deleteBattery(id) { if(!confirm('¿Eliminar batería y lecturas?')) return; showLoading(); try { await window.db.deleteRecord('batteries', id); await loadData(); renderAll(); } catch(err){ alert(err.message); } finally { hideLoading(); } }
-
-// ✅ DELETE READING CORREGIDO (Una sola confirmación, refresco forzado)
-async function deleteReading(id) {
-  if(!confirm('¿Eliminar esta lectura permanentemente?')) return;
-  showLoading();
-  try {
-    await window.db.deleteRecord('cell_readings', id);
-    readingsCache = readingsCache.filter(r => r.id !== id); // Optimista
-    await loadDataReadings(); // Refresco real desde BD
-    renderAll();
-  } catch(err) { alert('Error: '+err.message); } finally { hideLoading(); }
-}
+async function deleteReading(id) { if(!confirm('¿Eliminar esta lectura permanentemente?')) return; showLoading(); try { await window.db.deleteRecord('cell_readings', id); await loadDataReadings(); renderAll(); } catch(err){ alert(err.message); } finally { hideLoading(); } }
 
 function loadTheme() { document.body.className = localStorage.getItem('lifepo4_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
 function toggleTheme() { document.body.className = document.body.className === 'dark' ? 'light' : 'dark'; localStorage.setItem('lifepo4_theme', document.body.className); }
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
 
-function showLoginModal() { 
-  if ($modalActions) $modalActions.style.display = 'none'; document.getElementById('modal-title').textContent = 'Iniciar Sesión';
-  $fields.innerHTML = `<div style="margin-bottom:1rem"><label>Email</label><input type="email" id="auth-email" required></div><div style="margin-bottom:1rem"><label>Contraseña</label><input type="password" id="auth-pass" minlength="6" required></div><div style="display:flex;gap:0.5rem"><button type="button" id="auth-login" style="flex:1;padding:0.6rem;background:#dbeafe;color:#1d4ed8;border:none;border-radius:6px;">Entrar</button><button type="button" id="auth-signup" style="flex:1;padding:0.6rem;background:#fee2e2;color:#b91c1c;border:none;border-radius:6px;">Registrarse</button></div><p id="auth-error" style="color:#ef4444;font-size:0.85rem;margin-top:0.5rem;display:none;"></p>`;
-  $modal?.showModal(); document.getElementById('auth-login').onclick = async () => handleAuth('login'); document.getElementById('auth-signup').onclick = async () => handleAuth('signup');
-}
-async function handleAuth(type) {
-  const e = document.getElementById('auth-email').value, p = document.getElementById('auth-pass').value; const err = document.getElementById('auth-error');
-  if(!e||!p) { err.textContent='Completa los campos'; err.style.display='block'; return; }
-  showLoading(); err.style.display='none';
-  try { const res = type==='login' ? await window.db.signIn(e,p) : await window.db.signUp(e,p); hideLoading(); if(res?.data?.user) { if($modal?.open) $modal.close(); } else { err.textContent=res?.error?.message || 'Error'; err.style.display='block'; } } 
-  catch(ex) { hideLoading(); err.textContent=ex.message; err.style.display='block'; }
-}
+function showLoginModal() { if ($modalActions) $modalActions.style.display = 'none'; document.getElementById('modal-title').textContent = 'Iniciar Sesión'; $fields.innerHTML = `<div style="margin-bottom:1rem"><label>Email</label><input type="email" id="auth-email" required></div><div style="margin-bottom:1rem"><label>Contraseña</label><input type="password" id="auth-pass" minlength="6" required></div><div style="display:flex;gap:0.5rem"><button type="button" id="auth-login" style="flex:1;padding:0.6rem;background:#dbeafe;color:#1d4ed8;border:none;border-radius:6px;">Entrar</button><button type="button" id="auth-signup" style="flex:1;padding:0.6rem;background:#fee2e2;color:#b91c1c;border:none;border-radius:6px;">Registrarse</button></div><p id="auth-error" style="color:#ef4444;font-size:0.85rem;margin-top:0.5rem;display:none;"></p>`; $modal?.showModal(); document.getElementById('auth-login').onclick = async () => handleAuth('login'); document.getElementById('auth-signup').onclick = async () => handleAuth('signup'); }
+async function handleAuth(type) { const e = document.getElementById('auth-email').value, p = document.getElementById('auth-pass').value; const err = document.getElementById('auth-error'); if(!e||!p) { err.textContent='Completa los campos'; err.style.display='block'; return; } showLoading(); err.style.display='none'; try { const res = type==='login' ? await window.db.signIn(e,p) : await window.db.signUp(e,p); hideLoading(); if(res?.data?.user) { if($modal?.open) $modal.close(); } else { err.textContent=res?.error?.message || 'Error'; err.style.display='block'; } } catch(ex) { hideLoading(); err.textContent=ex.message; err.style.display='block'; } }
