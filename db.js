@@ -47,15 +47,20 @@ function validateVoltages(arr) { return arr.every(v => v >= 2.5 && v <= 3.65); }
 // ✅ CORREGIDO: Detecta "nuevo" ANTES de asignar UUID
 async function saveBattery(data) {
   const user = await getUser(); if (!user) throw new Error('No autenticado');
-  const { voltages_initial, ...payload } = data;
-  payload.user_id = user.id;
+  const { voltages_initial, id, ...rest } = data;
+  const payload = { ...rest, user_id: user.id };
+
+  // ✅ Validación anti-registros vacíos
+  if (!payload.name?.trim()) throw new Error('El nombre es obligatorio');
+  if (!payload.cell_count || parseInt(payload.cell_count) < 1) throw new Error('Cantidad de celdas inválida');
+
   payload.total_voltage = parseFloat(payload.total_voltage) || 0;
   payload.amperage = parseFloat(payload.amperage) || 0;
   payload.cell_count = parseInt(payload.cell_count) || 1;
 
-  // ✅ CORRECCIÓN: Detecta "nuevo" por el marcador 'new', no por existencia de ID
-  const isNew = !payload.id || payload.id === 'new';
-  if (isNew) payload.id = crypto.randomUUID();
+  // ✅ Genera UUID válido ANTES de enviar a Supabase
+  const isNew = !id || id === 'new';
+  payload.id = isNew ? crypto.randomUUID() : id;
 
   if (isOnline && supabaseClient) {
     if (isNew) {
@@ -69,17 +74,17 @@ async function saveBattery(data) {
     offlineQueue.push({ type: 'save', table: 'batteries', payload });
     localStorage.setItem('lifepo4_offline', JSON.stringify(offlineQueue));
   }
-  return payload.id; // ✅ Retorna el ID para encadenar la lectura
+  return payload.id; // ✅ Retorna el ID real para encadenar la lectura
 }
 
 async function saveReading(data) {
   const user = await getUser(); if (!user) throw new Error('No autenticado');
   if (!validateVoltages(data.voltages)) throw new Error('Voltajes fuera de rango (2.500 - 3.650 V)');
-  const payload = { user_id: user.id, ...data };
-  
-  // ✅ CORRECCIÓN CRÍTICA: Detecta creación por el string 'new'
-  const isNew = !payload.id || payload.id === 'new';
-  if (isNew) payload.id = crypto.randomUUID();
+  const { id, ...rest } = data;
+  const payload = { ...rest, user_id: user.id };
+
+  const isNew = !id || id === 'new';
+  payload.id = isNew ? crypto.randomUUID() : id;
 
   if (isOnline && supabaseClient) {
     if (isNew) {

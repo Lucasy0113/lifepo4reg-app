@@ -176,7 +176,21 @@ function setupEvents() {
 }
 
 function renderAll() { $list.innerHTML = ''; $pagination.innerHTML = ''; if (!currentUser) return; if (currentTab === 'dashboard') renderDashboard(); else renderReadingsList(); }
-function renderDashboard() { const filtered = filterValue === 'all' ? batteriesCache : batteriesCache.filter(b=>b.id===filterValue); if (!filtered.length) { $list.innerHTML = '<div class="empty-state">No hay baterías. Toca + para agregar una.</div>'; return; } filtered.forEach(b => { const readings = readingsCache.filter(r => r.battery_id === b.id); $list.innerHTML += renderBatteryCard(b, readings); }); }
+function renderDashboard() {
+  const filtered = filterValue === 'all' ? batteriesCache : batteriesCache.filter(b=>b.id===filterValue);
+  
+  // ✅ Filtra registros vacíos o incompletos
+  const validBatteries = filtered.filter(b => b.name && b.cell_count > 0);
+  
+  if (!validBatteries.length) { 
+    $list.innerHTML = '<div class="empty-state">No hay baterías válidas. Toca + para agregar una.</div>'; 
+    return; 
+  }
+  validBatteries.forEach(b => { 
+    const readings = readingsCache.filter(r => r.battery_id === b.id); 
+    $list.innerHTML += renderBatteryCard(b, readings); 
+  });
+}
 
 async function loadDataReadings() { if(!selectedBatteryId) return; readingsCache = await window.db.fetchReadings(selectedBatteryId); }
 function renderReadingsList() {
@@ -205,19 +219,46 @@ async function saveRecord(e) {
   e.preventDefault(); if(!currentUser) return showLoginModal(); showLoading();
   try {
     if(currentTab==='dashboard') {
-      const data = { id: editingId || 'new', created_at: new Date(document.getElementById('created_at').value).toISOString(), name: document.getElementById('name').value.trim(), model: document.getElementById('model').value.trim() || null, total_voltage: document.getElementById('total_voltage').value, amperage: document.getElementById('amperage').value, cell_count: document.getElementById('cell_count').value };
-      const voltages = []; for(let i=0; i<data.cell_count; i++) { const v = parseFloat(document.getElementById(`cell_${i}`).value); if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`); voltages.push(v); }
-      await window.db.saveBattery(data);
+      const isNew = !editingId;
+      const data = {
+        id: editingId || 'new',
+        created_at: new Date(document.getElementById('created_at').value).toISOString(),
+        name: document.getElementById('name').value.trim(),
+        model: document.getElementById('model').value.trim() || null,
+        total_voltage: document.getElementById('total_voltage').value,
+        amperage: document.getElementById('amperage').value,
+        cell_count: document.getElementById('cell_count').value
+      };
+      
+      const voltages = []; 
+      const cellCount = parseInt(data.cell_count) || 0;
+      for(let i=0; i<cellCount; i++) {
+        const v = parseFloat(document.getElementById(`cell_${i}`)?.value);
+        if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango (2.500-3.650V)`);
+        voltages.push(v);
+      }
+      
+      // ✅ Espera inserción real y obtén el ID generado
+      const batteryId = await window.db.saveBattery(data);
+      
       // ✅ SOLO crea lectura inicial si es UNA NUEVA batería
-      if (!editingId) await window.db.saveReading({ battery_id: data.id, recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
+      if (isNew && voltages.length > 0) {
+        await window.db.saveReading({ battery_id: batteryId, recorded_at: data.created_at, voltages, charger_v: 'MPPT', charger_a: 'MPPT' });
+      }
     } else {
       const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
-      const voltages = []; for(let i=0; i<bat.cell_count; i++) { const v = parseFloat(document.getElementById(`cell_${i}`).value); if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`); voltages.push(v); }
-      // ✅ Usa 'new' para que db.js use .insert() en lugar de .update()
+      const voltages = []; for(let i=0; i<bat.cell_count; i++) {
+        const v = parseFloat(document.getElementById(`cell_${i}`).value);
+        if(isNaN(v) || v<2.5 || v>3.65) throw new Error(`Cel ${i+1} fuera de rango`); voltages.push(v);
+      }
       const data = { id: editingId || 'new', battery_id: selectedBatteryId, recorded_at: new Date(document.getElementById('recorded_at').value).toISOString(), voltages, charger_v: document.getElementById('charger_v').value || 'MPPT', charger_a: document.getElementById('charger_a').value || 'MPPT' };
       await window.db.saveReading(data);
     }
-    $modal?.close(); await loadData(); if(currentTab==='readings') await loadDataReadings(); renderAll();
+    
+    $modal?.close(); 
+    await loadData(); 
+    if(currentTab==='readings') await loadDataReadings();
+    renderAll();
   } catch(err) { alert('Error: '+err.message); } finally { hideLoading(); }
 }
 
