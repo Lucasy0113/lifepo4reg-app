@@ -4,10 +4,10 @@ const ITEMS_PER_PAGE = 10;
 let editingId = null;
 let currentUser = null;
 let localCache = { fuel: [], maint: [] };
-let $summary, $list, $pagination, $modal, $form, $fields, $themeBtn, $addBtn;
-let $loadingOverlay, $submitBtn;
+let $summary, $list, $pagination, $modal, $form, $fields, $themeBtn, $addBtn, $loadingOverlay, $submitBtn;
 
 document.addEventListener('DOMContentLoaded', async () => {
+    // 🎯 Referencias DOM
     $summary = document.getElementById('summary');
     $list = document.getElementById('list-container');
     $pagination = document.getElementById('pagination');
@@ -19,18 +19,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     $loadingOverlay = document.getElementById('loading-overlay');
     $submitBtn = $form?.querySelector('button[type="submit"]');
 
+    // 🛡️ Liberar overlay si el SO/navegador interrumpe la carga
+    document.addEventListener('visibilitychange', hideLoading);
+    window.addEventListener('pageshow', hideLoading);
+
     loadTheme();
     await waitForDb();
     setupAuthListener();
     setupUserMenu();
     await checkAuth();
     setupEvents();
-
-    // 🛡️ BLOQUEAR RECARGAS AUTOMÁTICAS AL CAMBIAR PESTAÑA O IR A SEGUNDO PLANO
-    document.addEventListener('visibilitychange', () => {
-        hideLoading(); // Si el SO/navegador dejó el overlay trabado, liberarlo inmediatamente
-    });
-    window.addEventListener('pageshow', hideLoading);
 });
 
 function showLoading() {
@@ -51,23 +49,30 @@ function waitForDb(timeout = 5000) {
 }
 
 async function checkAuth() {
-    const saved = localStorage.getItem('mototrack_user');
-    if (saved && window.db) {
-        try {
+    showLoading(); // Mostrar mientras verifica
+    try {
+        const saved = localStorage.getItem('mototrack_user');
+        if (saved && window.db) {
             const user = await Promise.race([window.db.getCurrentUser(), new Promise(r => setTimeout(() => r(null), 3000))]);
             if (user) {
                 currentUser = user;
                 if ($addBtn) $addBtn.style.display = 'flex';
-                await loadData(); // ✅ ÚNICA carga automática: al iniciar sesión
+                const userBtn = document.getElementById('user-menu-btn');
+                if (userBtn) userBtn.style.display = 'flex';
+                await loadData(); // ✅ Carga datos y llama a renderAll
                 return;
             }
-        } catch (e) { console.warn('Auth check error:', e); }
-    }
+        }
+    } catch (e) { console.warn('Auth check error:', e); }
+    
+    // Si no hay sesión o falla
+    currentUser = null;
     if ($addBtn) $addBtn.style.display = 'none';
     const userBtn = document.getElementById('user-menu-btn');
     if (userBtn) userBtn.style.display = 'none';
+    hideLoading();
+    renderAll(); // Renderiza estado vacío
     showLoginModal();
-    renderAll();
 }
 
 function setupAuthListener() {
@@ -76,11 +81,12 @@ function setupAuthListener() {
         if (event === 'SIGNED_IN' && session?.user) {
             currentUser = session.user;
             localStorage.setItem('mototrack_user', JSON.stringify({ id: currentUser.id, email: currentUser.email }));
+            hideLoading();
             if ($modal?.open) $modal.close();
             const userBtn = document.getElementById('user-menu-btn');
             if (userBtn) userBtn.style.display = 'flex';
             if ($addBtn) $addBtn.style.display = 'flex';
-            loadData(); // ✅ Cargar solo al entrar
+            loadData();
         } else if (event === 'SIGNED_OUT') {
             currentUser = null;
             localCache = { fuel: [], maint: [] };
@@ -134,33 +140,33 @@ function setupUserMenu() {
             if (authError) throw new Error('Contraseña actual incorrecta');
             const { error: updateError } = await window.db.supabase.auth.updateUser({ password: newPass });
             if (updateError) throw updateError;
-            if ($passMsg) { $passMsg.textContent = '✅ Contraseña actualizada'; $passMsg.className = 'msg success'; }
+            if ($passMsg) { $passMsg.textContent = '✅ Actualizada'; $passMsg.className = 'msg success'; }
             const cp = document.getElementById('current-pass'), np = document.getElementById('new-pass'), cnp = document.getElementById('confirm-pass');
             if (cp) cp.value = ''; if (np) np.value = ''; if (cnp) cnp.value = '';
         } catch (err) {
             if ($passMsg) { $passMsg.textContent = '❌ ' + (err.message || 'Error'); $passMsg.className = 'msg error'; }
         } finally { hideLoading(); }
     });
-    $logoutBtn?.addEventListener('click', async () => {
-        if (confirm('¿Cerrar sesión?')) { await window.db.signOut(); closeDrawer(); }
-    });
+    $logoutBtn?.addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) { await window.db.signOut(); closeDrawer(); } });
 }
 
-// ✅ CARGA EXPLÍCITA: Solo se llama cuando el usuario interactúa o inicia sesión
+// ✅ CARGA DE DATOS CON FINALLY GARANTIZADO
 async function loadData() {
-    if (!window.db) { renderAll(); return; }
     showLoading();
     try {
+        if (!window.db) throw new Error('DB no disponible');
         const [fuel, maint] = await Promise.all([
             window.db.fetchRecords('fuel'),
             window.db.fetchRecords('maintenance')
         ]);
         localCache.fuel = calculateMetrics(fuel, 'fuel');
         localCache.maint = calculateMetrics(maint, 'maint');
+        console.log(`✅ Cargados: ${localCache.fuel.length} fuel, ${localCache.maint.length} maint`);
     } catch (e) {
-        console.error('❌ Error cargando:', e);
+        console.error('❌ Error cargando datos:', e);
+        localCache = { fuel: [], maint: [] };
     } finally {
-        hideLoading(); // ✅ SIEMPRE se oculta, evita pantallas trabadas
+        hideLoading(); // 🔑 SIEMPRE se ejecuta, evita pantalla trabada
         renderAll();
     }
 }
@@ -186,7 +192,6 @@ function calculateMetrics(records, type) {
 }
 
 function setupEvents() {
-    // ✅ TABS: Solo cambian vista y renderizan desde caché, SIN llamar a loadData()
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -194,7 +199,7 @@ function setupEvents() {
             e.target.classList.add('active');
             currentTab = e.target.dataset.tab;
             currentPage = 1;
-            renderAll();
+            renderAll(); // ✅ Solo renderiza caché, NO recarga red
         });
     });
 
@@ -230,9 +235,12 @@ function renderSummary(records) {
 
     const label = currentTab === 'fuel' ? 'Promedio General KM/L' : 'Promedio General KM/Mant.';
     const moneyLabel = currentTab === 'fuel' ? 'Dinero invertido (combustible)' : 'Dinero invertido (aceite)';
-    if ($summary) $summary.innerHTML = `
+    
+    if ($summary) {
+        $summary.innerHTML = `
         <div class="summary-stat"><span>${avgVal.toFixed(2)}</span>${label}</div>
         <div class="summary-stat"><span>$${totalMoney.toFixed(2)}</span>${moneyLabel}</div>`;
+    }
 }
 
 function renderList(records) {
@@ -240,28 +248,33 @@ function renderList(records) {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
     const pageData = records.slice(start, start + ITEMS_PER_PAGE);
     $list.innerHTML = '';
+    
     if (!pageData.length) {
-        $list.innerHTML = '<div class="empty-state">No hay registros aún. Toca + para agregar uno.</div>';
+        $list.innerHTML = '<div class="empty-state" style="text-align:center;padding:2rem;color:var(--text-sec);">No hay registros. Toca + para agregar uno.</div>';
         return;
     }
+
     pageData.forEach(rec => {
         const priceL = rec.price_per_liter ?? rec.pricePerL ?? 0;
         const oilType = rec.oil_type ?? rec.oilType ?? rec.type ?? 'N/A';
-        const dinero = currentTab === 'fuel' ? (parseFloat(rec.money) || (parseFloat(rec.liters) * parseFloat(priceL))).toFixed(2) : parseFloat(rec.price).toFixed(2);
-        
-        const fields = currentTab === 'fuel'
-            ? `<div class="record-row"><span class="label">📅 Fecha:</span><span class="value">${formatDate(rec.date)}</span></div>
-               <div class="record-row"><span class="label">🛣️ Odómetro:</span><span class="value">${rec.odometer} km</span></div>
-               <div class="record-row"><span class="label">⛽ Litros:</span><span class="value">${rec.liters} L</span></div>
-               <div class="record-row"><span class="label">💲 Precio/L:</span><span class="value">$${priceL}</span></div>
-               <div class="record-row money-row"><span class="label">💰 Dinero gastado:</span><span class="value">$${dinero}</span></div>
-               <div class="record-row"><span class="label">🔧 Intervalo:</span><span class="value">${rec.interval} KM</span></div>
-               <div class="record-row"><span class="label">🏁 Consumo:</span><span class="value">${rec.consumption} KM/L</span></div>`
-            : `<div class="record-row"><span class="label">📅 Fecha:</span><span class="value">${formatDate(rec.date)}</span></div>
-               <div class="record-row"><span class="label">🛣️ Odómetro:</span><span class="value">${rec.odometer} km</span></div>
-               <div class="record-row"><span class="label">🛢️ Aceite:</span><span class="value">${rec.brand} (${oilType} - ${rec.viscosity})</span></div>
-               <div class="record-row"><span class="label">💲 Precio:</span><span class="value">$${rec.price}</span></div>
-               <div class="record-row"><span class="label">🔧 Intervalo:</span><span class="value">${rec.consumption} KM</span></div>`;
+        const dinero = currentTab === 'fuel' 
+            ? (parseFloat(rec.money) || (parseFloat(rec.liters) * parseFloat(priceL))).toFixed(2) 
+            : parseFloat(rec.price).toFixed(2);
+
+        const fields = currentTab === 'fuel' ? `
+            <div class="record-row"><span class="label">📅 Fecha:</span><span class="value">${formatDate(rec.date)}</span></div>
+            <div class="record-row"><span class="label">🛣️ Odómetro:</span><span class="value">${rec.odometer} km</span></div>
+            <div class="record-row"><span class="label">⛽ Litros:</span><span class="value">${rec.liters} L</span></div>
+            <div class="record-row"><span class="label">💲 Precio/L:</span><span class="value">$${priceL}</span></div>
+            <div class="record-row money-row"><span class="label">💰 Dinero gastado:</span><span class="value">$${dinero}</span></div>
+            <div class="record-row"><span class="label">🔧 Intervalo:</span><span class="value">${rec.interval} KM</span></div>
+            <div class="record-row"><span class="label">🏁 Consumo:</span><span class="value">${rec.consumption} KM/L</span></div>`
+        : `
+            <div class="record-row"><span class="label">📅 Fecha:</span><span class="value">${formatDate(rec.date)}</span></div>
+            <div class="record-row"><span class="label">🛣️ Odómetro:</span><span class="value">${rec.odometer} km</span></div>
+            <div class="record-row"><span class="label">🛢️ Aceite:</span><span class="value">${rec.brand} (${oilType} - ${rec.viscosity})</span></div>
+            <div class="record-row"><span class="label">💲 Precio:</span><span class="value">$${rec.price}</span></div>
+            <div class="record-row"><span class="label">🔧 Intervalo:</span><span class="value">${rec.consumption} KM</span></div>`;
 
         $list.insertAdjacentHTML('beforeend', `
             <article class="record-card" data-id="${rec.id}">
@@ -306,28 +319,28 @@ function showLoginModal() {
     
     const $err = document.getElementById('auth-error');
     const $logBtn = document.getElementById('auth-login'), $regBtn = document.getElementById('auth-signup');
-    const reset = () => { $logBtn.disabled=$regBtn.disabled=false; $regBtn.textContent='Registrarse'; };
+    const reset = () => { $logBtn.disabled = $regBtn.disabled = false; $regBtn.textContent = 'Registrarse'; };
     
     $logBtn.onclick = async () => {
         const e = document.getElementById('auth-email').value.trim(), p = document.getElementById('auth-pass').value;
-        if (!e || !p) { $err.textContent='Ingresa email y contraseña'; $err.style.display='block'; return; }
-        $err.style.display='none'; $logBtn.disabled=$regBtn.disabled=true; $logBtn.textContent='Entrando...';
+        if (!e || !p) { $err.textContent = 'Ingresa email y contraseña'; $err.style.display = 'block'; return; }
+        $err.style.display = 'none'; $logBtn.disabled = $regBtn.disabled = true; $logBtn.textContent = 'Entrando...';
         try {
             const res = await window.db.signIn(e, p);
-            if (res?.data?.user) { $modal?.close(); } // El listener se encargará de loadData()
-            else { reset(); $err.textContent = res?.error?.message || 'Error'; $err.style.display='block'; }
-        } catch(err) { reset(); $err.textContent = err.message; $err.style.display='block'; }
+            if (res?.data?.user) { $modal?.close(); }
+            else { reset(); $err.textContent = res?.error?.message || 'Error'; $err.style.display = 'block'; }
+        } catch (err) { reset(); $err.textContent = err.message; $err.style.display = 'block'; }
     };
     $regBtn.onclick = async () => {
         const e = document.getElementById('auth-email').value.trim(), p = document.getElementById('auth-pass').value;
-        if (!e || !p) { $err.textContent='Ingresa email y contraseña'; $err.style.display='block'; return; }
-        if (p.length < 6) { $err.textContent='Mínimo 6 caracteres'; $err.style.display='block'; return; }
-        $err.style.display='none'; $logBtn.disabled=$regBtn.disabled=true; $regBtn.textContent='Creando...';
+        if (!e || !p) { $err.textContent = 'Ingresa email y contraseña'; $err.style.display = 'block'; return; }
+        if (p.length < 6) { $err.textContent = 'Mínimo 6 caracteres'; $err.style.display = 'block'; return; }
+        $err.style.display = 'none'; $logBtn.disabled = $regBtn.disabled = true; $regBtn.textContent = 'Creando...';
         try {
             const res = await window.db.signUp(e, p);
-            if (res?.data?.user) { $modal?.close(); } // El listener se encargará de loadData()
-            else { reset(); $err.textContent = res?.error?.message || 'Error'; $err.style.display='block'; }
-        } catch(err) { reset(); $err.textContent = err.message; $err.style.display='block'; }
+            if (res?.data?.user) { $modal?.close(); }
+            else { reset(); $err.textContent = res?.error?.message || 'Error'; $err.style.display = 'block'; }
+        } catch (err) { reset(); $err.textContent = err.message; $err.style.display = 'block'; }
     };
 }
 
@@ -337,27 +350,27 @@ function openModal(id = null) {
     if (modalActions) modalActions.style.display = 'flex';
     editingId = id;
     const rec = id ? localCache[currentTab].find(r => r.id === id) : null;
-    if(document.getElementById('modal-title')) document.getElementById('modal-title').textContent = id ? 'Editar Registro' : 'Nuevo Registro';
+    if (document.getElementById('modal-title')) document.getElementById('modal-title').textContent = id ? 'Editar Registro' : 'Nuevo Registro';
     
     const now = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
-    if($fields) $fields.innerHTML = '';
+    if ($fields) $fields.innerHTML = '';
     const safePriceL = rec?.price_per_liter ?? rec?.pricePerL ?? '';
     const safeOilType = rec?.oil_type ?? rec?.oilType ?? rec?.type ?? 'Sintético';
-    const fieldsConfig = currentTab === 'fuel'
-        ? [
-            { id: 'date', label: 'Fecha y hora', type: 'datetime-local', val: rec?.date?.slice(0,16) || now },
-            { id: 'odometer', label: 'Odómetro (km)', type: 'number', val: rec?.odometer || '' },
-            { id: 'liters', label: 'Litros', type: 'number', step: '0.01', val: rec?.liters || '' },
-            { id: 'pricePerL', label: 'Precio por litro ($)', type: 'number', step: '0.01', val: safePriceL }
-          ]
-        : [
-            { id: 'date', label: 'Fecha y hora', type: 'datetime-local', val: rec?.date?.slice(0,16) || now },
-            { id: 'odometer', label: 'Odómetro (km)', type: 'number', val: rec?.odometer || '' },
-            { id: 'brand', label: 'Marca del aceite', type: 'text', val: rec?.brand || '' },
-            { id: 'type', label: 'Tipo', type: 'select', opts: ['Sintético', 'Natural'], val: safeOilType },
-            { id: 'viscosity', label: 'Viscosidad (ej: 10W40)', type: 'text', val: rec?.viscosity || '' },
-            { id: 'price', label: 'Precio del aceite ($)', type: 'number', step: '0.01', val: rec?.price || '' }
-          ];
+    
+    const fieldsConfig = currentTab === 'fuel' ? [
+        { id: 'date', label: 'Fecha y hora', type: 'datetime-local', val: rec?.date?.slice(0,16) || now },
+        { id: 'odometer', label: 'Odómetro (km)', type: 'number', val: rec?.odometer || '' },
+        { id: 'liters', label: 'Litros', type: 'number', step: '0.01', val: rec?.liters || '' },
+        { id: 'pricePerL', label: 'Precio por litro ($)', type: 'number', step: '0.01', val: safePriceL }
+    ] : [
+        { id: 'date', label: 'Fecha y hora', type: 'datetime-local', val: rec?.date?.slice(0,16) || now },
+        { id: 'odometer', label: 'Odómetro (km)', type: 'number', val: rec?.odometer || '' },
+        { id: 'brand', label: 'Marca del aceite', type: 'text', val: rec?.brand || '' },
+        { id: 'type', label: 'Tipo', type: 'select', opts: ['Sintético', 'Natural'], val: safeOilType },
+        { id: 'viscosity', label: 'Viscosidad (ej: 10W40)', type: 'text', val: rec?.viscosity || '' },
+        { id: 'price', label: 'Precio del aceite ($)', type: 'number', step: '0.01', val: rec?.price || '' }
+    ];
+
     fieldsConfig.forEach(f => {
         const wrap = document.createElement('div');
         wrap.style.marginBottom = '0.75rem';
@@ -365,7 +378,7 @@ function openModal(id = null) {
         if (f.type === 'select') {
             const sel = document.createElement('select');
             sel.id = f.id; sel.required = true; sel.style.cssText = 'width:100%; padding:0.5rem; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text);';
-            f.opts.forEach(o => { const opt = document.createElement('option'); opt.value = o; opt.textContent = o; if(o===f.val) opt.selected=true; sel.appendChild(opt); });
+            f.opts.forEach(o => { const opt = document.createElement('option'); opt.value = o; opt.textContent = o; if (o === f.val) opt.selected = true; sel.appendChild(opt); });
             wrap.appendChild(sel);
         } else {
             const inp = document.createElement('input');
@@ -389,14 +402,14 @@ async function saveRecord(e) {
     try {
         if (currentTab === 'fuel') {
             data.id = editingId || 'new';
-            data.money = (parseFloat(data.liters)*parseFloat(data.pricePerL)).toFixed(2);
+            data.money = (parseFloat(data.liters) * parseFloat(data.pricePerL)).toFixed(2);
         } else {
             data.id = editingId || 'new';
             data.money = parseFloat(data.price).toFixed(2);
         }
         await window.db.saveRecord(currentTab === 'fuel' ? 'fuel' : 'maintenance', data);
         $modal?.close();
-        await loadData(); // ✅ Solo recargar tras guardar explícitamente
+        await loadData(); // ✅ Recarga y renderiza automáticamente
     } catch (err) {
         alert('Error: ' + err.message);
         console.error(err);
@@ -409,10 +422,9 @@ async function deleteRecord(id) {
     showLoading();
     try {
         await window.db.deleteRecord(currentTab === 'fuel' ? 'fuel' : 'maintenance', id);
-        await loadData(); // ✅ Solo recargar tras eliminar explícitamente
+        await loadData();
     } catch (err) {
         alert('Error: ' + err.message);
-        console.error(err);
     } finally { hideLoading(); }
 }
 
@@ -424,6 +436,7 @@ function formatDate(iso) {
         hour: '2-digit', minute: '2-digit', hour12: false
     }).replace(',', ' -');
 }
+
 function loadTheme() { document.body.className = localStorage.getItem('mototrack_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
 function toggleTheme() { document.body.className = document.body.className === 'dark' ? 'light' : 'dark'; localStorage.setItem('mototrack_theme', document.body.className); }
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
