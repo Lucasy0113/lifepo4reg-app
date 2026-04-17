@@ -4,7 +4,7 @@ const ITEMS_PER_PAGE = 10;
 let editingId = null;
 let currentUser = null;
 let batteriesCache = [];
-let readingsMap = {}; // Almacena lecturas por ID de batería
+let readingsMap = {};
 let selectedBatteryId = null;
 let filterValue = 'all';
 
@@ -12,7 +12,7 @@ let $list, $pagination, $modal, $form, $fields, $themeBtn, $addBtn, $loadingOver
 let $batteryFilter, $drawer, $drawerOverlay, $modalActions;
 
 document.addEventListener('DOMContentLoaded', async () => {
-    // Referencias DOM
+    // Referencias
     $list = document.getElementById('list-container');
     $pagination = document.getElementById('pagination');
     $modal = document.getElementById('modal');
@@ -27,28 +27,30 @@ document.addEventListener('DOMContentLoaded', async () => {
     $drawer = document.getElementById('user-drawer');
     $drawerOverlay = document.getElementById('drawer-overlay');
 
+    // 🛡️ SAFEGUARD: Evita pantalla trabada al volver de segundo plano
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) hideLoading();
+    });
+    window.addEventListener('pageshow', hideLoading);
+
     // Limpieza inicial
     if($modal?.open) $modal.close();
     $drawer?.classList.remove('open');
     $drawerOverlay?.classList.remove('open');
-    hideLoading(); // Asegurar que no quede bloqueado al inicio
-
+    hideLoading();
+    
     loadTheme();
     await waitForDb();
     setupAuthListener();
     setupUserMenu();
-    
-    // Verificar sesión y cargar datos UNA VEZ
     await checkAuth();
-    
-    // Configurar eventos
     setupEvents();
 });
 
-// 🟢 Control de Carga (Loading) Seguro
+// 🟢 Control de Carga (SIEMPRE garantizado)
 function showLoading() { 
     if ($loadingOverlay) $loadingOverlay.classList.add('active'); 
-    if ($submitBtn) { $submitBtn.disabled = true; $submitBtn.textContent = '⏳ Guardando...'; } 
+    if ($submitBtn) { $submitBtn.disabled = true; $submitBtn.textContent = '⏳ Procesando...'; } 
 }
 function hideLoading() { 
     if ($loadingOverlay) $loadingOverlay.classList.remove('active'); 
@@ -70,9 +72,7 @@ function getAge(date) {
     if (!date) return 'N/D'; 
     const start = new Date(date); 
     const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Havana' })); 
-    let y = now.getFullYear() - start.getFullYear(); 
-    let m = now.getMonth() - start.getMonth(); 
-    let d = now.getDate() - start.getDate(); 
+    let y = now.getFullYear() - start.getFullYear(); let m = now.getMonth() - start.getMonth(); let d = now.getDate() - start.getDate(); 
     if (d < 0) { m--; d += new Date(now.getFullYear(), now.getMonth(), 0).getDate(); } 
     if (m < 0) { y--; m += 12; } 
     return `${y}a ${m}m ${d}d`; 
@@ -80,7 +80,7 @@ function getAge(date) {
 function parseChargerVal(val) { if (!val || val === 'MPPT') return 'MPPT'; const n = parseFloat(val); return isNaN(n) ? 'MPPT' : n.toFixed(2); }
 function formatDate(iso) { if (!iso) return 'N/D'; return new Date(iso).toLocaleString('es-CU', { timeZone: 'America/Havana', year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).replace(',', ' -'); }
 
-// 🎨 Renderizado de Celdas y Estadísticas
+// 🎨 Renderizado
 function renderCells(voltages, type) {
     if (!Array.isArray(voltages) || voltages.length === 0) return '<div class="empty-state">N/D</div>';
     const vals = voltages.map(v => parseFloat(v));
@@ -89,8 +89,8 @@ function renderCells(voltages, type) {
     let html = `<div class="cell-grid">`;
     vals.forEach((v, i) => {
         let cls = '';
-        if (type === 'diff') { if (v === max) cls = 'cell-low'; else if (v === min) cls = 'cell-high'; } // Lógica invertida
-        else { if (v === max) cls = 'cell-high'; else if (v === min) cls = 'cell-low'; } // Lógica normal
+        if (type === 'diff') { if (v === max) cls = 'cell-low'; else if (v === min) cls = 'cell-high'; }
+        else { if (v === max) cls = 'cell-high'; else if (v === min) cls = 'cell-low'; }
         html += `<div class="cell-box ${cls}"><div class="cell-label">Cel ${i+1}</div><div class="cell-value">${v.toFixed(3)}V</div></div>`;
     });
     html += `</div>`; return html;
@@ -106,20 +106,16 @@ function renderStats(voltages) {
 
 function renderBatteryCard(b, readings) {
     const age = getAge(b.created_at);
-    // Cálculos seguros
     const peakCells = readings.length ? readings.map(r => r.voltages).reduce((acc, curr) => acc.map((v,i) => Math.max(v, parseFloat(curr?.[i])||0)), Array(b.cell_count).fill(0)) : null;
     const latest = readings[0] || null;
 
     let html = `<article class="battery-card" data-id="${b.id}">
         <h3>${b.name} ${b.model?`(${b.model})`:''}</h3>
         <p style="color:var(--text-sec); font-size:0.9rem;">${b.total_voltage}V / ${b.amperage}Ah • Vida: ${age}</p>
-        
         <div class="section-title">Valor Tope Histórico</div>${renderCells(peakCells, 'peak')}${renderStats(peakCells)}
         <div class="charger-info">Cargador V: ${latest?.charger_v || 'N/D'} | Cargador A: ${latest?.charger_a || 'N/D'}</div><div class="separator-blue"></div>
-        
         <div class="section-title">Valor Último</div>${renderCells(latest?.voltages, 'latest')}${renderStats(latest?.voltages)}
         <div class="charger-info">Cargador V: ${parseChargerVal(latest?.charger_v)} | Cargador A: ${parseChargerVal(latest?.charger_a)}</div><div class="separator-gray"></div>
-        
         <div class="section-title">Valor Estimado (Δ Histórico vs Último)</div>`;
 
     if (peakCells && latest) {
@@ -145,13 +141,12 @@ async function checkAuth() {
                 currentUser = user;
                 if($addBtn) $addBtn.style.display = 'flex';
                 document.getElementById('user-menu-btn').style.display = 'flex';
-                await loadData(); // Única carga automática
+                await loadData(); // Única carga automática permitida
                 return;
             }
         }
     } catch (e) { console.warn('Auth check error:', e); }
     
-    // Si falla o no hay usuario
     currentUser = null;
     if($addBtn) $addBtn.style.display = 'none';
     document.getElementById('user-menu-btn').style.display = 'none';
@@ -199,7 +194,6 @@ function setupUserMenu() {
     });
     const closeDrawer = () => { $drawer?.classList.remove('open'); $drawerOverlay?.classList.remove('open'); };
     $closeDrawer?.addEventListener('click', closeDrawer); $drawerOverlay?.addEventListener('click', closeDrawer);
-
     $passForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const cp = document.getElementById('current-pass').value, np = document.getElementById('new-pass').value, cnp = document.getElementById('confirm-pass').value;
@@ -218,26 +212,23 @@ function setupUserMenu() {
     $logoutBtn?.addEventListener('click', async () => { if (confirm('¿Cerrar sesión?')) { await window.db.signOut(); closeDrawer(); } });
 }
 
-// 📥 Carga de Datos (SOLO cuando se llama explícitamente)
+// 📥 Carga de Datos (SOLO llamada explícitamente)
 async function loadData() {
     showLoading();
     try {
-        if (!window.db) throw new Error("DB not ready");
+        if (!window.db) throw new Error("DB no disponible");
         batteriesCache = await window.db.fetchBatteries();
         readingsMap = {};
-        
         if (batteriesCache.length > 0) {
-            // Cargar lecturas de todas las baterías
             const promises = batteriesCache.map(b => window.db.fetchReadings(b.id));
             const results = await Promise.all(promises);
             batteriesCache.forEach((b, i) => { readingsMap[b.id] = results[i] || []; });
         }
-        
         updateFilterDropdown();
     } catch (e) {
         console.error('❌ Error cargando:', e);
     } finally {
-        hideLoading(); // GARANTIZADO: siempre se oculta el overlay
+        hideLoading(); // GARANTIZADO: siempre se oculta
         renderAll();
     }
 }
@@ -252,22 +243,19 @@ function updateFilterDropdown() {
     if (selectedBatteryId && batteriesCache.some(b=>b.id===selectedBatteryId)) $batteryFilter.value = selectedBatteryId;
 }
 
-// ⚙️ Eventos
+// ⚙️ Eventos (SIN recargas automáticas)
 function setupEvents() {
-    // Tabs: SOLO cambian vista y renderizan caché. NO recargan de red.
+    // Tabs: SOLO cambian vista. NO llaman a loadData().
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            e.preventDefault(); 
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             const tab = e.target.dataset.tab;
             document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
             e.target.classList.add('active');
             currentTab = tab; currentPage = 1;
             if (tab === 'readings' && !selectedBatteryId) {
-                // Si intenta ir a lecturas sin batería, vuelve al panel o avisa
                 $list.innerHTML = '<div class="empty-state">Selecciona una batería en el Panel primero.</div>';
-                $pagination.innerHTML = '';
-                return;
+                $pagination.innerHTML = ''; return;
             }
             renderAll();
         });
@@ -276,8 +264,7 @@ function setupEvents() {
     $batteryFilter.addEventListener('change', (e) => { 
         filterValue = e.target.value; 
         selectedBatteryId = filterValue === 'all' ? null : filterValue; 
-        currentPage = 1; 
-        renderAll(); 
+        currentPage = 1; renderAll(); 
     });
 
     $addBtn?.addEventListener('click', () => currentUser ? openBatteryModal() : showLoginModal());
@@ -285,29 +272,28 @@ function setupEvents() {
     $modal?.addEventListener('close', () => { editingId = null; $form?.reset(); });
     $form?.addEventListener('submit', saveRecord);
     
-    // Listado Click (Delegación de eventos)
+    // ✅ Delegación de eventos ROBUSTA para evitar borrado accidental
     $list?.addEventListener('click', (e) => {
-        const target = e.target.closest('button');
-        if (!target || !currentUser) return;
+        const btn = e.target.closest('button');
+        if (!btn || !currentUser) return;
         
-        // IMPORTANTE: Prevenir comportamiento por defecto y propagación
         e.preventDefault();
-        e.stopPropagation();
+        e.stopPropagation(); // Detiene propagación inmediatamente
 
-        const card = target.closest('.battery-card, .reading-card');
+        const card = btn.closest('.battery-card, .reading-card');
         const id = card?.dataset.id;
         
-        if (target.classList.contains('btn-readings')) { 
+        if (btn.classList.contains('btn-readings')) { 
             selectedBatteryId = id; filterValue = id; $batteryFilter.value = id;
             currentTab = 'readings'; currentPage = 1;
             document.querySelector('.tab-btn[data-tab="readings"]').classList.add('active');
             document.querySelector('.tab-btn[data-tab="dashboard"]').classList.remove('active');
             renderAll(); return; 
         }
-        if (target.classList.contains('btn-edit')) openBatteryModal(id);
-        if (target.classList.contains('btn-delete')) deleteBattery(id);
-        if (target.classList.contains('reading-edit')) openReadingModal(id);
-        if (target.classList.contains('reading-delete')) deleteReading(id);
+        if (btn.classList.contains('btn-edit')) openBatteryModal(id);
+        if (btn.classList.contains('btn-delete')) deleteBattery(id);
+        if (btn.classList.contains('reading-edit')) openReadingModal(id);
+        if (btn.classList.contains('reading-delete')) deleteReading(id);
     });
     $themeBtn?.addEventListener('click', toggleTheme);
 }
@@ -323,6 +309,13 @@ function renderDashboard() {
     const validBatteries = batteriesCache.filter(b => b.name && b.cell_count > 0);
     if (!validBatteries.length) { $list.innerHTML = '<div class="empty-state">No hay baterías válidas. Toca + para agregar una.</div>'; return; }
     validBatteries.forEach(b => { $list.insertAdjacentHTML('beforeend', renderBatteryCard(b, readingsMap[b.id] || [])); });
+}
+
+function goBackToPanel() {
+    currentTab = 'dashboard'; selectedBatteryId = null; filterValue = 'all'; $batteryFilter.value = 'all';
+    document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active');
+    document.querySelector('.tab-btn[data-tab="readings"]').classList.remove('active');
+    renderAll();
 }
 
 function renderReadingsList() {
@@ -363,23 +356,14 @@ function renderReadingsList() {
     renderPagination(totalPages);
 }
 
-function goBackToPanel() {
-    currentTab = 'dashboard'; selectedBatteryId = null; filterValue = 'all'; $batteryFilter.value = 'all';
-    document.querySelector('.tab-btn[data-tab="dashboard"]').classList.add('active');
-    document.querySelector('.tab-btn[data-tab="readings"]').classList.remove('active');
-    renderAll();
-}
-
 function renderPagination(totalPages) { if(totalPages<=1) return ''; let html = '<div class="pagination">'; for(let i=1; i<=totalPages; i++) html += `<button onclick="currentPage=${i}; renderAll();" ${i===currentPage?'style="font-weight:bold;background:var(--primary);color:white;"':''}>${i}</button>`; $pagination.innerHTML = html; }
 
-// 📝 Modales y Guardado
+// 📝 Modales
 function openBatteryModal(id=null) { 
-    if ($modalActions) $modalActions.style.display = 'flex'; 
-    editingId = id; 
+    if ($modalActions) $modalActions.style.display = 'flex'; editingId = id; 
     const bat = id ? batteriesCache.find(b=>b.id===id) : null; 
     document.getElementById('modal-title').textContent = id ? 'Editar Batería' : 'Nueva Batería'; 
-    $fields.innerHTML = ''; 
-    const now = getCubaNowISO(); 
+    $fields.innerHTML = ''; const now = getCubaNowISO(); 
     const config = [{id:'created_at', label:'Fecha/Hora Compra', type:'datetime-local', val: bat?.created_at?.slice(0,16) || now},{id:'name', label:'Nombre', type:'text', val: bat?.name || ''},{id:'model', label:'Modelo', type:'text', val: bat?.model || ''},{id:'total_voltage', label:'Voltaje Total', type:'number', step:'0.01', val: bat?.total_voltage || ''},{id:'amperage', label:'Capacidad (Ah)', type:'number', step:'0.01', val: bat?.amperage || ''},{id:'cell_count', label:'Celdas', type:'number', step:'1', min:'1', val: bat?.cell_count || ''}]; 
     config.forEach(f => appendField(f)); 
     if(bat?.cell_count) appendCellFields(bat.cell_count, []); 
@@ -390,31 +374,27 @@ function appendField(f) { const wrap = document.createElement('div'); wrap.style
 function appendCellFields(count, initialVals=[]) { let html = '<div id="cells-container" style="margin-top:0.5rem; border-top:1px solid var(--border); padding-top:0.5rem;"><label style="display:block; margin-bottom:0.3rem; font-weight:500;">Voltaje Inicial (2.5-3.65V)</label>'; for(let i=0; i<count; i++) html += `<input type="number" step="0.001" id="cell_${i}" placeholder="Cel ${i+1} (V)" value="${initialVals[i]||''}" required style="margin-bottom:0.3rem;">`; html += '</div>'; $fields.insertAdjacentHTML('beforeend', html); }
 
 function openReadingModal(id=null) { 
-    if ($modalActions) $modalActions.style.display = 'flex'; 
-    editingId = id; 
-    const bat = batteriesCache.find(b=>b.id===selectedBatteryId); 
-    if(!bat) return alert("Selecciona una batería primero");
+    if ($modalActions) $modalActions.style.display = 'flex'; editingId = id; 
+    if (!selectedBatteryId) return alert("Selecciona una batería primero");
+    const bat = batteriesCache.find(b=>b.id===selectedBatteryId);
+    if (!bat) return alert("Batería no encontrada");
     
-    // Buscar lectura actual si es edición
     const readings = readingsMap[bat.id] || [];
     const read = id ? readings.find(r=>r.id===id) : null; 
     
     document.getElementById('modal-title').textContent = id ? 'Editar Lectura' : 'Nueva Lectura'; 
-    $fields.innerHTML = ''; 
-    const now = getCubaNowISO(); 
+    $fields.innerHTML = ''; const now = getCubaNowISO(); 
     appendField({id:'recorded_at', label:'Fecha/Hora Lectura', type:'datetime-local', val: read?.recorded_at?.slice(0,16) || now}); 
     
     let html = `<div id="cells-container"><label style="display:block; margin-bottom:0.3rem; font-weight:500;">Voltaje por Celda (2.500 - 3.650 V)</label>`;
-    for(let i=0; i<bat.cell_count; i++) { 
-        const val = read?.voltages ? (read.voltages[i]||'') : ''; 
-        html += `<input type="number" step="0.001" id="cell_${i}" placeholder="Cel ${i+1} (V)" value="${val}" required style="margin-bottom:0.3rem;">`; 
-    }
+    for(let i=0; i<bat.cell_count; i++) { const val = read?.voltages ? (read.voltages[i]||'') : ''; html += `<input type="number" step="0.001" id="cell_${i}" placeholder="Cel ${i+1} (V)" value="${val}" required style="margin-bottom:0.3rem;">`; }
     html += `</div><div style="margin-top:0.5rem;"><label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador V</label><input type="text" id="charger_v" value="${read?.charger_v || 'MPPT'}" style="margin-bottom:0.5rem;"><label style="display:block; margin-bottom:0.2rem; font-weight:500;">Cargador A</label><input type="text" id="charger_a" value="${read?.charger_a || 'MPPT'}"></div>`; 
     
     $fields.insertAdjacentHTML('beforeend', html); 
     $modal?.showModal(); 
 }
 
+// 💾 Guardado y Eliminación
 async function saveRecord(e) { 
     e.preventDefault(); if(!currentUser) return showLoginModal(); showLoading(); try {
         if(currentTab==='dashboard') {
@@ -436,6 +416,7 @@ async function saveRecord(e) {
 async function deleteBattery(id) { if(!confirm('¿Eliminar batería?')) return; showLoading(); try { await window.db.deleteRecord('batteries', id); await loadData(); } catch(err){ alert(err.message); } finally { hideLoading(); } }
 async function deleteReading(id) { if(!confirm('¿Eliminar lectura?')) return; showLoading(); try { await window.db.deleteRecord('cell_readings', id); await loadData(); } catch(err){ alert(err.message); } finally { hideLoading(); } }
 
+// 🎨 Utilidades
 function loadTheme() { document.body.className = localStorage.getItem('lifepo4_theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); }
 function toggleTheme() { document.body.className = document.body.className === 'dark' ? 'light' : 'dark'; localStorage.setItem('lifepo4_theme', document.body.className); }
 if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
@@ -452,8 +433,6 @@ async function handleAuth(type) {
     const err = document.getElementById('auth-error');
     if(!e||!p) { err.textContent='Completa los campos'; err.style.display='block'; return; }
     showLoading(); err.style.display='none';
-    try {
-        const res = type==='login' ? await window.db.signIn(e,p) : await window.db.signUp(e,p);
-        hideLoading(); if(res?.data?.user) { if($modal?.open) $modal.close(); } else { err.textContent=res?.error?.message || 'Error'; err.style.display='block'; }
-    } catch(ex) { hideLoading(); err.textContent=ex.message; err.style.display='block'; }
+    try { const res = type==='login' ? await window.db.signIn(e,p) : await window.db.signUp(e,p); hideLoading(); if(res?.data?.user) { if($modal?.open) $modal.close(); } else { err.textContent=res?.error?.message || 'Error'; err.style.display='block'; } } 
+    catch(ex) { hideLoading(); err.textContent=ex.message; err.style.display='block'; }
 }
